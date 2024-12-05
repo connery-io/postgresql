@@ -1,6 +1,29 @@
 # PostgreSQL
 
-Connery plugin to chat with a PostgreSQL database
+Connery plugin to chat with a PostgreSQL database.
+
+## Actions
+
+This plugin provides three actions for interacting with PostgreSQL databases:
+
+1. **Chat with your DB** (`chatWithYourDb`)
+
+   - Executes a read-only SQL query and returns the results
+   - Requires read-only connection string and SQL query as inputs
+   - Automatically retrieves the schema of the database and uses it to generate the SQL query
+   - Perfect for SELECT statements and data retrieval for non-technical users
+
+2. **Update Specific Field or Record** (`updateSpecificFieldOfRecord`)
+
+   - Updates a specific field in a database record using a predefined query template
+   - Requires write-enabled connection string, update query template with {record} and {value} placeholders
+   - Supports transaction handling with automatic rollback on failure
+   - Returns both the executed query and the updated record
+
+3. **Update Any Field of Record with AI** (`updateAnyFieldOfRecordWithAI`)
+   - Updates a single field in a specific database record using natural language, where AI generates the SQL automatically.
+   - Requires Anthropic API key, write-enabled connection string, and an explicit description of the record, field, and new value to update.
+   - Returns the executed query and the updated record.
 
 ## Repository structure
 

@@ -1,10 +1,12 @@
 import { PluginDefinition, setupPluginServer } from 'connery';
-import chatWithYourPostgresqlDb from "./actions/chatWithYourPostgresqlDb.js";
+import chatWithYourDb from "./actions/chatWithYourDb.js";
+import updateRecordWithGenAI from "./actions/updateAnyFieldOfRecordWithAI.js";
+import updateSpecificFieldOfRecord from "./actions/updateSpecificFieldOfRecord.js";
 
 const pluginDefinition: PluginDefinition = {
   name: 'PostgreSQL',
   description: 'Connery plugin to chat with a PostgreSQL database',
-  actions: [chatWithYourPostgresqlDb],
+  actions: [chatWithYourDb, updateRecordWithGenAI, updateSpecificFieldOfRecord],
 };
 
 const handler = await setupPluginServer(pluginDefinition);
