@@ -20,7 +20,7 @@ const actionDefinition: ActionDefinition = {
     {
       key: 'updateQuery',
       name: 'Update Query Template',
-      description: 'SQL UPDATE query template with {record} and {value} placeholders',
+      description: 'SQL UPDATE query template with {record_id} and {new_value} placeholders',
       type: 'string',
       validation: {
         required: true,
@@ -89,9 +89,10 @@ export async function handler({ input }: ActionContext): Promise<OutputObject> {
     
     const updateQuery = constructUpdateQuery(
       input.updateQuery,
-      input.record,
-      input.updateValue
+      input.recordId,
+      input.newValue
     );
+    
     const result = await executeTransaction(client, updateQuery);
     
     return {
@@ -146,16 +147,16 @@ function formatQueryResponse(updateQuery: string): string {
   return updateQuery;
 }
 
-function constructUpdateQuery(queryTemplate: string, record: string, value: string): string {
+function constructUpdateQuery(queryTemplate: string, recordId: string, newValue: string): string {
   // Validate that the template contains both placeholders
-  if (!queryTemplate.includes('{record}') || !queryTemplate.includes('{value}')) {
-    throw new Error('Update query template must contain both {record} and {value} placeholders');
+  if (!queryTemplate.includes('{record_id}') || !queryTemplate.includes('{new_value}')) {
+    throw new Error('Update query template must contain both {record_id} and {new_value} placeholders');
   }
 
   // Use String.prototype.replace with a replacer function to preserve case
   const updateStatement = queryTemplate
-    .replace(/{record}/g, (match) => `'${record}'`) // Preserve case of record
-    .replace(/{value}/g, (match) => `'${value}'`);  // Preserve case of value
+    .replace(/{record_id}/g, (match) => `'${recordId}'`)
+    .replace(/{new_value}/g, (match) => `'${newValue}'`);
 
   // Extract the WHERE clause to use in the SELECT statement
   const whereClauseMatch = updateStatement.match(/WHERE\s+(.+)$/i);
