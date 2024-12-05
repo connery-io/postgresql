@@ -27,17 +27,17 @@ const actionDefinition: ActionDefinition = {
       },
     },
     {
-      key: 'record',
+      key: 'recordId',
       name: 'Record Identifier',
-      description: 'Value to replace {record} placeholder in the query',
+      description: 'Value to replace {record_id} placeholder in the query',
       type: 'string',
       validation: {
         required: true,
       },
     },
     {
-      key: 'updateValue',
-      name: 'Update Value',
+      key: 'newValue',
+      name: 'New Value',
       description: 'New value to replace {new_value} placeholder in the query',
       type: 'string',
       validation: {
