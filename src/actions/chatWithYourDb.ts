@@ -240,10 +240,13 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         - Limit results to ${maxRows} rows using LIMIT clause
         - Use explicit column names instead of SELECT *
         - Add ORDER BY clauses when relevant
+        - When using numeric calculations:
+          * Cast numeric values explicitly (e.g., CAST(value AS NUMERIC))
+          * Use ROUND(CAST(value AS NUMERIC), 2) for decimal places
+          * Handle NULL values with COALESCE
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
-
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
