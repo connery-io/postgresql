@@ -244,6 +244,11 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Cast numeric values explicitly (e.g., CAST(value AS NUMERIC))
           * Use ROUND(CAST(value AS NUMERIC), 2) for decimal places
           * Handle NULL values with COALESCE
+        - When combining results (top/bottom rankings):
+          * Use WITH clauses for better readability
+          * Ensure column names and types match in UNION queries
+          * Add labels/indicators to distinguish top vs bottom results
+          * Use row_number() for rankings when needed
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
