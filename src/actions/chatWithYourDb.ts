@@ -238,6 +238,9 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Cast numeric values explicitly (e.g., CAST(value AS NUMERIC))
           * Use ROUND(CAST(value AS NUMERIC), 2) for decimal places
           * Handle NULL values with COALESCE
+          * For averages, use AVG(CAST(column AS NUMERIC))
+          * For sums, use SUM(CAST(column AS NUMERIC))
+          * For counts, use COUNT(*) when possible
         - When combining results (top/bottom rankings):
           * Use WITH clauses for better readability
           * Ensure column names and types match in UNION queries
@@ -259,6 +262,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Ensure proper type casting for all date/time fields
           * Use count(*) instead of count(column) when possible
           * Always cast numeric aggregations to NUMERIC
+          * For segmentation, use CASE statements with explicit casts
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
