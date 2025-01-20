@@ -263,6 +263,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Use count(*) instead of count(column) when possible
           * Always cast numeric aggregations to NUMERIC
           * For segmentation, use CASE statements with explicit casts
+        - For table references and aliases:
+          * Always qualify column names with table aliases
+          * Define each CTE with a clear purpose
+          * Reference the correct CTE in subsequent calculations
+          * Use meaningful alias names (e.g., orders o, customers c)
+          * Ensure all referenced tables exist in FROM clause
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
