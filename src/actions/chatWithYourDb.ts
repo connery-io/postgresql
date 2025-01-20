@@ -248,6 +248,16 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Calculate quartiles using percentile_cont without OVER clause
           * For outliers, use 1.5 * IQR method with pre-calculated quartiles
           * Avoid window functions with ordered-set aggregates
+        - For date/time calculations:
+          * Use date_part() instead of extract()
+          * Cast timestamps to date when comparing dates
+          * Use age() for time differences
+          * Avoid timezone-specific functions unless necessary
+        - For customer behavior analysis:
+          * Pre-calculate aggregates in CTEs
+          * Use date_trunc() for time-based grouping
+          * Calculate frequencies using count() with group by
+          * Handle null values in aggregations with COALESCE
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
