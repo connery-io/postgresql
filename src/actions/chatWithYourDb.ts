@@ -243,6 +243,11 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Ensure column names and types match in UNION queries
           * Add labels/indicators to distinguish top vs bottom results
           * Use row_number() for rankings when needed
+        - For statistical analysis and outliers:
+          * Use CTEs to calculate statistics separately
+          * Calculate quartiles using percentile_cont without OVER clause
+          * For outliers, use 1.5 * IQR method with pre-calculated quartiles
+          * Avoid window functions with ordered-set aggregates
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
