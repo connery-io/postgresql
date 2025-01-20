@@ -119,109 +119,103 @@ export async function handler({ input }: ActionContext): Promise<OutputObject> {
 
 async function getSchemaInfo(client: pkg.Client): Promise<string> {
   const schemaQuery = `
-    WITH columns_info AS (
-      SELECT
-          c.table_schema,
-          c.table_name,
-          c.column_name,
-          c.data_type,
-          c.is_nullable,
-          c.column_default,
-          c.ordinal_position
-      FROM
-          information_schema.columns c
-      WHERE
-          c.table_schema NOT IN ('pg_catalog', 'information_schema')
-    ),
-    primary_keys AS (
-      SELECT
-          kcu.table_schema,
-          kcu.table_name,
-          kcu.column_name
-      FROM
-          information_schema.table_constraints tc
-      JOIN
-          information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-      WHERE
-          tc.constraint_type = 'PRIMARY KEY'
-          AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
-    ),
-    foreign_keys AS (
-      SELECT
-          kcu.table_schema AS table_schema,
-          kcu.table_name AS table_name,
-          kcu.column_name AS column_name,
-          ccu.table_schema AS foreign_table_schema,
-          ccu.table_name AS foreign_table_name,
-          ccu.column_name AS foreign_column_name
-      FROM
-          information_schema.table_constraints tc
-      JOIN
-          information_schema.key_column_usage kcu
-          ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-      JOIN
-          information_schema.constraint_column_usage ccu
-          ON ccu.constraint_name = tc.constraint_name
-          AND ccu.table_schema = tc.table_schema
-      WHERE
-          tc.constraint_type = 'FOREIGN KEY'
-          AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+    WITH RECURSIVE table_info AS (
+      SELECT 
+        t.table_schema,
+        t.table_name,
+        t.table_type,
+        (
+          SELECT jsonb_agg(jsonb_build_object(
+            'column_name', c.column_name,
+            'data_type', CASE 
+              WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name 
+              ELSE c.data_type 
+            END,
+            'is_nullable', c.is_nullable,
+            'column_default', c.column_default
+          ) ORDER BY c.ordinal_position)
+          FROM information_schema.columns c 
+          WHERE c.table_schema = t.table_schema 
+          AND c.table_name = t.table_name
+        ) as columns,
+        (
+          SELECT jsonb_agg(jsonb_build_object(
+            'constraint_type', tc.constraint_type,
+            'column_name', kcu.column_name,
+            'foreign_table', CASE 
+              WHEN tc.constraint_type = 'FOREIGN KEY' 
+              THEN ccu.table_name 
+              ELSE null 
+            END,
+            'foreign_column', CASE 
+              WHEN tc.constraint_type = 'FOREIGN KEY' 
+              THEN ccu.column_name 
+              ELSE null 
+            END
+          ))
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu 
+            ON tc.constraint_name = kcu.constraint_name
+          LEFT JOIN information_schema.constraint_column_usage ccu 
+            ON tc.constraint_name = ccu.constraint_name
+          WHERE tc.table_schema = t.table_schema 
+          AND tc.table_name = t.table_name
+          AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE')
+        ) as constraints
+      FROM information_schema.tables t
+      WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
+      AND t.table_type IN ('BASE TABLE', 'VIEW', 'MATERIALIZED VIEW')
     )
-    SELECT
-      jsonb_pretty(
-          jsonb_agg(
-              jsonb_build_object(
-                  'table_schema', tbl.table_schema,
-                  'table_name', tbl.table_name,
-                  'columns', tbl.columns
-              )
-          )
-      ) AS schema_json
-    FROM (
-      SELECT
-          c.table_schema,
-          c.table_name,
-          jsonb_agg(
-              jsonb_build_object(
-                  'column_name', c.column_name,
-                  'data_type', c.data_type,
-                  'is_nullable', c.is_nullable,
-                  'column_default', c.column_default,
-                  'is_primary_key', CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END,
-                  'is_foreign_key', CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END,
-                  'foreign_table_schema', fk.foreign_table_schema,
-                  'foreign_table_name', fk.foreign_table_name,
-                  'foreign_column_name', fk.foreign_column_name
-              ) ORDER BY c.ordinal_position
-          ) AS columns
-      FROM
-          columns_info c
-      LEFT JOIN
-          primary_keys pk
-          ON c.table_schema = pk.table_schema
-          AND c.table_name = pk.table_name
-          AND c.column_name = pk.column_name
-      LEFT JOIN
-          foreign_keys fk
-          ON c.table_schema = fk.table_schema
-          AND c.table_name = fk.table_name
-          AND c.column_name = fk.column_name
-      GROUP BY
-          c.table_schema,
-          c.table_name
-      ORDER BY
-          c.table_schema,
-          c.table_name
-    ) tbl;
+    SELECT jsonb_pretty(
+      jsonb_agg(
+        jsonb_build_object(
+          'schema', table_schema,
+          'name', table_name,
+          'type', table_type,
+          'columns', columns,
+          'constraints', constraints
+        )
+        ORDER BY table_schema, table_name
+      )
+    ) as schema_json
+    FROM table_info
+    WHERE columns IS NOT NULL
+    LIMIT 1000;  -- Safety limit for very large DBs
   `;
-  
-  const schemaResult = await client.query(schemaQuery);
-  
-  const schemaJson = schemaResult.rows[0].schema_json;
-  return schemaJson;
+
+  try {
+    const schemaResult = await Promise.race([
+      client.query(schemaQuery),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Schema query timeout after 30s')), 30000)
+      )
+    ]) as pkg.QueryResult;
+    
+    return schemaResult.rows[0].schema_json || '[]';
+  } catch (error) {
+    // Fallback to a simpler schema query if the detailed one fails
+    const simpleSchemaQuery = `
+      SELECT jsonb_pretty(jsonb_agg(
+        jsonb_build_object(
+          'name', table_name,
+          'columns', (
+            SELECT jsonb_agg(jsonb_build_object(
+              'column_name', column_name,
+              'data_type', data_type
+            ))
+            FROM information_schema.columns c 
+            WHERE c.table_name = t.table_name
+          )
+        )
+      ))
+      FROM information_schema.tables t
+      WHERE table_schema = 'public'
+      AND table_type = 'BASE TABLE';
+    `;
+    
+    const fallbackResult = await client.query(simpleSchemaQuery);
+    return fallbackResult.rows[0].jsonb_pretty || '[]';
+  }
 }
 
 async function generateSqlQuery(apiKey: string, schemaInfo: string, question: string, maxRows: number): Promise<string> {
