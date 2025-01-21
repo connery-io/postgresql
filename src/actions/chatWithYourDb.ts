@@ -228,7 +228,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         - Use ONLY tables and columns that exist in the provided schema information
         - Do not make assumptions about columns that aren't explicitly listed in the schema
         - Generate only SELECT queries (no INSERT, UPDATE, DELETE, etc.)
-        - Ensure queries are optimized for performance
+        - Ensure queries are optimized for performance:
+          * Limit complex calculations to necessary rows
+          * Use WHERE clauses before aggregations
+          * Keep CTEs simple and focused
+          * Avoid multiple passes over large datasets
+          * Use indexes when available (usually primary keys)
         - Include relevant JOINs when needed
         - Add inline comments with -- to explain the query
         - Limit results to ${maxRows} rows using LIMIT clause
@@ -269,6 +274,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Reference the correct CTE in subsequent calculations
           * Use meaningful alias names (e.g., orders o, customers c)
           * Ensure all referenced tables exist in FROM clause
+        - Query optimization requirements:
+          * Limit to essential joins only
+          * Filter data early in the query
+          * Use subqueries sparingly
+          * Avoid cross joins
+          * Keep window functions minimal
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
         - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
