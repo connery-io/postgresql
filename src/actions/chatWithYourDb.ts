@@ -417,16 +417,20 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Add sort columns for segment ordering
           * Keep aggregation logic consistent across segments
 
-        - For UNION queries with ordering:
-          * Add sort_order column in UNIONed queries
-          * Keep ORDER BY outside the UNION in main query
-          * Structure as: 
-            WITH combined AS (
-              SELECT ..., 0 as sort_order FROM ...
+        - For queries with segments and totals:
+          * Never put ORDER BY inside UNION queries
+          * Structure segmentation queries as:
+            WITH metrics AS (
+              -- Calculate base metrics
+            ),
+            combined AS (
+              SELECT 'Segment1' as segment, 1 as sort_order, ... FROM metrics WHERE ...
               UNION ALL
-              SELECT ..., 1 as sort_order FROM ...
+              SELECT 'Segment2' as segment, 2 as sort_order, ... FROM metrics WHERE ...
+              UNION ALL
+              SELECT 'Total' as segment, 3 as sort_order, ... FROM metrics
             )
-            SELECT ... FROM combined ORDER BY sort_order
+            SELECT * FROM combined ORDER BY sort_order;
         
         - For segmentation and grouping logic:
           * Define mutually exclusive conditions
