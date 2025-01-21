@@ -357,93 +357,26 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Document segment definitions in comments
         
         - For statistical calculations:
-          * Calculate base metrics first in a CTE
-          * Compute aggregates before correlation
-          * Never nest window functions inside aggregates
-          * For correlation: pre-calculate means and deviations
-        
-        - For queries with segments and totals:
-          * Never put ORDER BY inside UNION queries
-          * Structure segmentation queries as:
-            WITH metrics AS (
-              -- Calculate base metrics
+          * Structure correlation calculations:
+            WITH base_metrics AS (
+              SELECT key_id,
+                AVG(value1) as metric1,
+                AVG(value2) as metric2
+              FROM source_table
+              GROUP BY key_id
             ),
-            combined AS (
-              SELECT 'Segment1' as segment, 1 as sort_order, ... FROM metrics WHERE ...
-              UNION ALL
-              SELECT 'Segment2' as segment, 2 as sort_order, ... FROM metrics WHERE ...
-              UNION ALL
-              SELECT 'Total' as segment, 3 as sort_order, ... FROM metrics
+            stats AS (
+              SELECT 
+                COUNT(*) as n,
+                AVG(metric1) as avg1,
+                AVG(metric2) as avg2,
+                STDDEV(metric1) as stddev1,
+                STDDEV(metric2) as stddev2,
+                SUM((metric1 - AVG(metric1) OVER()) * (metric2 - AVG(metric2) OVER())) / (COUNT(*) - 1) as covar
+              FROM base_metrics
             )
-            SELECT * FROM combined ORDER BY sort_order;
-        
-        - For segmentation and grouping logic:
-          * Define mutually exclusive conditions
-          * Use EXISTS/NOT EXISTS for related table checks
-          * Avoid counting same records multiple times
-          * For "any" conditions, use EXISTS subqueries
-          * For "all" conditions, use NOT EXISTS with negation
-          * Use CASE WHEN for clear segment definitions
-          * Verify segments are complete and non-overlapping
-          * Document segment logic in comments
-        - For aggregations across related tables:
-          * Use EXISTS for "at least one" relationships
-          * Use NOT EXISTS for "none" relationships
-          * Avoid JOIN when checking existence is sufficient
-          * Count distinct primary keys to prevent duplicates
-          * Verify totals match expected row counts
-        - For hierarchical data analysis:
-          * When analyzing parent records (e.g., orders, invoices):
-            - Consider all child records (e.g., line items, details) for segmentation
-            - Use EXISTS/NOT EXISTS to check conditions across child records
-            - For "records with condition":
-              EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
-            - For "records without condition":
-              NOT EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
-          * Calculate aggregates at the appropriate level
-          * Document the analysis level in comments
-          * Verify parent-child relationships using schema constraints
-        - For segmentation analysis:
-          * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
-          * Include total counts/values for verification:
-            - Use UNION ALL to add a "Total" segment
-            - Calculate totals without segmentation criteria
-            - Place total row last using ORDER BY
-            - Example structure:
-              WITH base_metrics AS (...),
-              segmented AS (...),
-              totals AS (...)
-              SELECT ... FROM segmented
-              UNION ALL
-              SELECT 'Total' as segment, ... FROM totals
-              ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
-          * Add validation comments showing segment math
-          * Ensure segment values sum up to totals
-        
-        - For segmentation with totals:
-          * Structure queries with proper ordering:
-            - Wrap segmented results and totals in a CTE
-            - Apply final ordering outside the UNION
-            - Example pattern:
-              WITH base_data AS (...),
-              segment_calcs AS (...),
-              total_calcs AS (...),
-              combined_results AS (
-                SELECT ..., 0 as sort_order FROM segment_calcs
-                UNION ALL
-                SELECT ..., 1 as sort_order FROM total_calcs
-              )
-              SELECT ... FROM combined_results
-              ORDER BY sort_order
-          * Add numeric sort_order column for reliable ordering
-          * Keep ORDER BY outside of UNIONed queries
-          * Document segment definitions in comments
-        
-        - For statistical calculations:
-          * Calculate base metrics first in a CTE
-          * Compute aggregates before correlation
-          * Never nest window functions inside aggregates
-          * For correlation: pre-calculate means and deviations
+            SELECT covar/(stddev1 * stddev2) as correlation
+            FROM stats;
         
         - For complex aggregations with segments:
           * Structure multi-level aggregations properly:
