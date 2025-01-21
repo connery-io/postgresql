@@ -274,6 +274,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Reference the correct CTE in subsequent calculations
           * Use meaningful alias names (e.g., orders o, customers c)
           * Ensure all referenced tables exist in FROM clause
+        - For CTEs and subqueries:
+          * Always name CTEs descriptively (e.g., avg_discounts, order_totals)
+          * Reference CTEs in the main query using their full names
+          * Include all necessary CTEs in the WITH clause
+          * Chain CTEs in logical order
+          * Ensure each CTE is properly referenced
         - Query optimization requirements:
           * Limit to essential joins only
           * Filter data early in the query
