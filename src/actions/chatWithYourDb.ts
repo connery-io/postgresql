@@ -415,6 +415,140 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             ORDER BY sort_order, segment_name;
           * Never use ORDER BY within UNIONed queries
           * Add sort columns for segment ordering
+          * Keep aggregation logic consistent across segments
+
+        - For UNION queries with ordering:
+          * Add sort_order column in UNIONed queries
+          * Keep ORDER BY outside the UNION in main query
+          * Structure as: 
+            WITH combined AS (
+              SELECT ..., 0 as sort_order FROM ...
+              UNION ALL
+              SELECT ..., 1 as sort_order FROM ...
+            )
+            SELECT ... FROM combined ORDER BY sort_order
+        
+        - For segmentation and grouping logic:
+          * Define mutually exclusive conditions
+          * Use EXISTS/NOT EXISTS for related table checks
+          * Avoid counting same records multiple times
+          * For "any" conditions, use EXISTS subqueries
+          * For "all" conditions, use NOT EXISTS with negation
+          * Use CASE WHEN for clear segment definitions
+          * Verify segments are complete and non-overlapping
+          * Document segment logic in comments
+        - For aggregations across related tables:
+          * Use EXISTS for "at least one" relationships
+          * Use NOT EXISTS for "none" relationships
+          * Avoid JOIN when checking existence is sufficient
+          * Count distinct primary keys to prevent duplicates
+          * Verify totals match expected row counts
+        - For hierarchical data analysis:
+          * When analyzing parent records (e.g., orders, invoices):
+            - Consider all child records (e.g., line items, details) for segmentation
+            - Use EXISTS/NOT EXISTS to check conditions across child records
+            - For "records with condition":
+              EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
+            - For "records without condition":
+              NOT EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
+          * Calculate aggregates at the appropriate level
+          * Document the analysis level in comments
+          * Verify parent-child relationships using schema constraints
+        - For segmentation analysis:
+          * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
+          * Include total counts/values for verification:
+            - Use UNION ALL to add a "Total" segment
+            - Calculate totals without segmentation criteria
+            - Place total row last using ORDER BY
+            - Example structure:
+              WITH base_metrics AS (...),
+              segmented AS (...),
+              totals AS (...)
+              SELECT ... FROM segmented
+              UNION ALL
+              SELECT 'Total' as segment, ... FROM totals
+              ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
+          * Add validation comments showing segment math
+          * Ensure segment values sum up to totals
+        
+        - For segmentation with totals:
+          * Structure queries with proper ordering:
+            - Wrap segmented results and totals in a CTE
+            - Apply final ordering outside the UNION
+            - Example pattern:
+              WITH base_data AS (...),
+              segment_calcs AS (...),
+              total_calcs AS (...),
+              combined_results AS (
+                SELECT ..., 0 as sort_order FROM segment_calcs
+                UNION ALL
+                SELECT ..., 1 as sort_order FROM total_calcs
+              )
+              SELECT ... FROM combined_results
+              ORDER BY sort_order
+          * Add numeric sort_order column for reliable ordering
+          * Keep ORDER BY outside of UNIONed queries
+          * Document segment definitions in comments
+        
+        - For statistical calculations:
+          * Calculate base metrics in separate CTEs:
+            WITH base_metrics AS (
+              SELECT 
+                key_id,
+                AVG(value1) as avg_value1,
+                AVG(value2) as avg_value2
+              FROM source_table
+              GROUP BY key_id
+            ),
+            stats AS (
+              SELECT
+                COUNT(*) as n,
+                AVG(avg_value1) as mean1,
+                AVG(avg_value2) as mean2,
+                STDDEV(avg_value1) as stddev1,
+                STDDEV(avg_value2) as stddev2
+              FROM base_metrics
+            )
+          * For correlation coefficient:
+            - Calculate components separately
+            - Use single-row CTEs for stats
+            - Avoid grouping on statistical results
+            - Reference pre-calculated stats
+          * Document statistical formulas in comments
+        
+        - For complex aggregations with segments:
+          * Structure multi-level aggregations properly:
+            WITH 
+            base_calculations AS (
+              -- Calculate raw metrics
+              SELECT ... FROM source_table
+            ),
+            segment_metrics AS (
+              -- Calculate segment-specific metrics
+              SELECT 
+                'Segment Name' as segment_name,
+                metrics...
+              FROM base_calculations
+              WHERE segment_condition
+            ),
+            total_metrics AS (
+              -- Calculate overall totals
+              SELECT 
+                'Total' as segment_name,
+                metrics...
+              FROM base_calculations
+            ),
+            combined_results AS (
+              -- Combine segments and totals
+              SELECT *, 0 as sort_order FROM segment_metrics
+              UNION ALL
+              SELECT *, 1 as sort_order FROM total_metrics
+            )
+            -- Final selection with ordering
+            SELECT * FROM combined_results
+            ORDER BY sort_order, segment_name;
+          * Never use ORDER BY within UNIONed queries
+          * Add sort columns for segment ordering
           * Keep aggregation logic consistent across segments`;
 
   const ai = new Anthropic({ apiKey });
