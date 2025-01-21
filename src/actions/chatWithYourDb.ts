@@ -309,7 +309,34 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Use NOT EXISTS for "none" relationships
           * Avoid JOIN when checking existence is sufficient
           * Count distinct primary keys to prevent duplicates
-          * Verify totals match expected row counts`;
+          * Verify totals match expected row counts
+        - For hierarchical data analysis:
+          * When analyzing parent records (e.g., orders, invoices):
+            - Consider all child records (e.g., line items, details) for segmentation
+            - Use EXISTS/NOT EXISTS to check conditions across child records
+            - For "records with condition":
+              EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
+            - For "records without condition":
+              NOT EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
+          * Calculate aggregates at the appropriate level
+          * Document the analysis level in comments
+          * Verify parent-child relationships using schema constraints
+        - For segmentation analysis:
+          * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
+          * Include total counts/values for verification:
+            - Use UNION ALL to add a "Total" segment
+            - Calculate totals without segmentation criteria
+            - Place total row last using ORDER BY
+            - Example structure:
+              WITH base_metrics AS (...),
+              segmented AS (...),
+              totals AS (...)
+              SELECT ... FROM segmented
+              UNION ALL
+              SELECT 'Total' as segment, ... FROM totals
+              ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
+          * Add validation comments showing segment math
+          * Ensure segment values sum up to totals`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
