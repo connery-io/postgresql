@@ -381,7 +381,42 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             - Use single-row CTEs for stats
             - Avoid grouping on statistical results
             - Reference pre-calculated stats
-          * Document statistical formulas in comments`;
+          * Document statistical formulas in comments
+        
+        - For complex aggregations with segments:
+          * Structure multi-level aggregations properly:
+            WITH 
+            base_calculations AS (
+              -- Calculate raw metrics
+              SELECT ... FROM source_table
+            ),
+            segment_metrics AS (
+              -- Calculate segment-specific metrics
+              SELECT 
+                'Segment Name' as segment_name,
+                metrics...
+              FROM base_calculations
+              WHERE segment_condition
+            ),
+            total_metrics AS (
+              -- Calculate overall totals
+              SELECT 
+                'Total' as segment_name,
+                metrics...
+              FROM base_calculations
+            ),
+            combined_results AS (
+              -- Combine segments and totals
+              SELECT *, 0 as sort_order FROM segment_metrics
+              UNION ALL
+              SELECT *, 1 as sort_order FROM total_metrics
+            )
+            -- Final selection with ordering
+            SELECT * FROM combined_results
+            ORDER BY sort_order, segment_name;
+          * Never use ORDER BY within UNIONed queries
+          * Add sort columns for segment ordering
+          * Keep aggregation logic consistent across segments`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
