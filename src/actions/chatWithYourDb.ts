@@ -246,6 +246,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * For averages, use AVG(CAST(column AS NUMERIC))
           * For sums, use SUM(CAST(column AS NUMERIC))
           * For counts, use COUNT(*) when possible
+        - For aggregations and grouping:
+          * Calculate aggregates in CTEs before grouping
+          * Never use aggregate functions in GROUP BY clauses
+          * Use HAVING for filtering aggregate results
+          * Group by actual columns, not expressions
+          * Use subqueries for complex aggregations
         - When combining results (top/bottom rankings):
           * Use WITH clauses for better readability
           * Ensure column names and types match in UNION queries
