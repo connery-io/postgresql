@@ -355,7 +355,33 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
               ORDER BY sort_order
           * Add numeric sort_order column for reliable ordering
           * Keep ORDER BY outside of UNIONed queries
-          * Document segment definitions in comments`;
+          * Document segment definitions in comments
+        
+        - For statistical calculations:
+          * Calculate base metrics in separate CTEs:
+            WITH base_metrics AS (
+              SELECT 
+                key_id,
+                AVG(value1) as avg_value1,
+                AVG(value2) as avg_value2
+              FROM source_table
+              GROUP BY key_id
+            ),
+            stats AS (
+              SELECT
+                COUNT(*) as n,
+                AVG(avg_value1) as mean1,
+                AVG(avg_value2) as mean2,
+                STDDEV(avg_value1) as stddev1,
+                STDDEV(avg_value2) as stddev2
+              FROM base_metrics
+            )
+          * For correlation coefficient:
+            - Calculate components separately
+            - Use single-row CTEs for stats
+            - Avoid grouping on statistical results
+            - Reference pre-calculated stats
+          * Document statistical formulas in comments`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
