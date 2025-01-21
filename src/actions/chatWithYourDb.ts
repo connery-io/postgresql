@@ -357,66 +357,11 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Document segment definitions in comments
         
         - For statistical calculations:
-          * Calculate base metrics in separate CTEs:
-            WITH base_metrics AS (
-              SELECT 
-                key_id,
-                AVG(value1) as avg_value1,
-                AVG(value2) as avg_value2
-              FROM source_table
-              GROUP BY key_id
-            ),
-            stats AS (
-              SELECT
-                COUNT(*) as n,
-                AVG(avg_value1) as mean1,
-                AVG(avg_value2) as mean2,
-                STDDEV(avg_value1) as stddev1,
-                STDDEV(avg_value2) as stddev2
-              FROM base_metrics
-            )
-          * For correlation coefficient:
-            - Calculate components separately
-            - Use single-row CTEs for stats
-            - Avoid grouping on statistical results
-            - Reference pre-calculated stats
-          * Document statistical formulas in comments
+          * Calculate base metrics first in a CTE
+          * Compute aggregates before correlation
+          * Never nest window functions inside aggregates
+          * For correlation: pre-calculate means and deviations
         
-        - For complex aggregations with segments:
-          * Structure multi-level aggregations properly:
-            WITH 
-            base_calculations AS (
-              -- Calculate raw metrics
-              SELECT ... FROM source_table
-            ),
-            segment_metrics AS (
-              -- Calculate segment-specific metrics
-              SELECT 
-                'Segment Name' as segment_name,
-                metrics...
-              FROM base_calculations
-              WHERE segment_condition
-            ),
-            total_metrics AS (
-              -- Calculate overall totals
-              SELECT 
-                'Total' as segment_name,
-                metrics...
-              FROM base_calculations
-            ),
-            combined_results AS (
-              -- Combine segments and totals
-              SELECT *, 0 as sort_order FROM segment_metrics
-              UNION ALL
-              SELECT *, 1 as sort_order FROM total_metrics
-            )
-            -- Final selection with ordering
-            SELECT * FROM combined_results
-            ORDER BY sort_order, segment_name;
-          * Never use ORDER BY within UNIONed queries
-          * Add sort columns for segment ordering
-          * Keep aggregation logic consistent across segments
-
         - For queries with segments and totals:
           * Never put ORDER BY inside UNION queries
           * Structure segmentation queries as:
@@ -495,30 +440,10 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Document segment definitions in comments
         
         - For statistical calculations:
-          * Calculate base metrics in separate CTEs:
-            WITH base_metrics AS (
-              SELECT 
-                key_id,
-                AVG(value1) as avg_value1,
-                AVG(value2) as avg_value2
-              FROM source_table
-              GROUP BY key_id
-            ),
-            stats AS (
-              SELECT
-                COUNT(*) as n,
-                AVG(avg_value1) as mean1,
-                AVG(avg_value2) as mean2,
-                STDDEV(avg_value1) as stddev1,
-                STDDEV(avg_value2) as stddev2
-              FROM base_metrics
-            )
-          * For correlation coefficient:
-            - Calculate components separately
-            - Use single-row CTEs for stats
-            - Avoid grouping on statistical results
-            - Reference pre-calculated stats
-          * Document statistical formulas in comments
+          * Calculate base metrics first in a CTE
+          * Compute aggregates before correlation
+          * Never nest window functions inside aggregates
+          * For correlation: pre-calculate means and deviations
         
         - For complex aggregations with segments:
           * Structure multi-level aggregations properly:
