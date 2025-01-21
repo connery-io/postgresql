@@ -294,7 +294,22 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Keep window functions minimal
         - Do not include markdown code blocks or SQL syntax highlighting in your response
         - Do not include any other text in your response
-        - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"`;
+        - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"
+        - For segmentation and grouping logic:
+          * Define mutually exclusive conditions
+          * Use EXISTS/NOT EXISTS for related table checks
+          * Avoid counting same records multiple times
+          * For "any" conditions, use EXISTS subqueries
+          * For "all" conditions, use NOT EXISTS with negation
+          * Use CASE WHEN for clear segment definitions
+          * Verify segments are complete and non-overlapping
+          * Document segment logic in comments
+        - For aggregations across related tables:
+          * Use EXISTS for "at least one" relationships
+          * Use NOT EXISTS for "none" relationships
+          * Avoid JOIN when checking existence is sufficient
+          * Count distinct primary keys to prevent duplicates
+          * Verify totals match expected row counts`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
