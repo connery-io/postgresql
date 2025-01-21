@@ -336,7 +336,26 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
               SELECT 'Total' as segment, ... FROM totals
               ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
           * Add validation comments showing segment math
-          * Ensure segment values sum up to totals`;
+          * Ensure segment values sum up to totals
+        
+        - For segmentation with totals:
+          * Structure queries with proper ordering:
+            - Wrap segmented results and totals in a CTE
+            - Apply final ordering outside the UNION
+            - Example pattern:
+              WITH base_data AS (...),
+              segment_calcs AS (...),
+              total_calcs AS (...),
+              combined_results AS (
+                SELECT ..., 0 as sort_order FROM segment_calcs
+                UNION ALL
+                SELECT ..., 1 as sort_order FROM total_calcs
+              )
+              SELECT ... FROM combined_results
+              ORDER BY sort_order
+          * Add numeric sort_order column for reliable ordering
+          * Keep ORDER BY outside of UNIONed queries
+          * Document segment definitions in comments`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
