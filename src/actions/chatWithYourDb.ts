@@ -418,7 +418,29 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             ORDER BY sort_order, segment_name;
           * Never use ORDER BY within UNIONed queries
           * Add sort columns for segment ordering
-          * Keep aggregation logic consistent across segments`;
+          * Keep aggregation logic consistent across segments
+
+        - For percentile-based segmentation:
+          * Calculate segments in steps:
+            WITH base_data AS (
+              SELECT *,
+                NTILE(N) OVER (ORDER BY value) as segment
+              FROM source_table
+            ),
+            metrics AS (
+              SELECT 
+                segment,
+                COUNT(*) as count,
+                AVG(value1) as avg1,
+                AVG(value2) as avg2
+              FROM base_data
+              GROUP BY segment
+            )
+            SELECT * FROM metrics
+            ORDER BY segment;
+          * Never use window functions in GROUP BY or aggregates
+          * Calculate NTILE() before any aggregations
+          * Use simple GROUP BY on pre-calculated segments`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
