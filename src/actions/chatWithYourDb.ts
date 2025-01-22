@@ -337,86 +337,39 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Add validation comments showing segment math
           * Ensure segment values sum up to totals
         
-        - For segmented analysis with totals:
+        - For segmented aggregations:
           * Structure as:
             WITH base_metrics AS (
-              -- Calculate base metrics
-              SELECT ... FROM source_table
-            ),
-            all_segments AS (
-              SELECT 'With Discounts' as segment, 0 as sort_order, ...
-                FROM base_metrics WHERE condition
-              UNION ALL
-              SELECT 'No Discounts' as segment, 1 as sort_order, ...
-                FROM base_metrics WHERE NOT condition
-              UNION ALL
-              SELECT 'Total' as segment, 2 as sort_order, ...
-                FROM base_metrics
-            )
-            SELECT * FROM all_segments ORDER BY sort_order;
-          * Keep ORDER BY only in final SELECT
-          * Add sort_order for segment ordering
-        
-        - For statistical calculations:
-          * Calculate correlations in steps:
-            WITH base_metrics AS (
-              SELECT key_id,
-                AVG(value1) as metric1,
-                AVG(value2) as metric2
+              -- First calculate row-level metrics
+              SELECT 
+                CASE WHEN condition THEN 'A' ELSE 'B' END as segment,
+                field1,
+                field2,
+                field3
               FROM source_table
-              GROUP BY key_id
-            ),
-            means AS (
-              SELECT 
-                AVG(metric1) as avg1,
-                AVG(metric2) as avg2
-              FROM base_metrics
-            ),
-            deviations AS (
-              SELECT 
-                base_metrics.*,
-                means.avg1,
-                means.avg2,
-                (metric1 - means.avg1) * (metric2 - means.avg2) as deviation_product,
-                POWER(metric1 - means.avg1, 2) as dev1_squared,
-                POWER(metric2 - means.avg2, 2) as dev2_squared
-              FROM base_metrics CROSS JOIN means
-            )
-            SELECT 
-              SUM(deviation_product) / SQRT(SUM(dev1_squared) * SUM(dev2_squared)) as correlation
-            FROM deviations;
-        
-        - For complex aggregations with segments:
-          * Structure multi-level aggregations properly:
-            WITH 
-            base_calculations AS (
-              -- Calculate raw metrics
-              SELECT ... FROM source_table
             ),
             segment_metrics AS (
-              -- Calculate segment-specific metrics
+              -- Then aggregate by segment
               SELECT 
-                'Segment Name' as segment_name,
-                metrics...
-              FROM base_calculations
-              WHERE segment_condition
-            ),
-            total_metrics AS (
-              -- Calculate overall totals
-              SELECT 
-                'Total' as segment_name,
-                metrics...
-              FROM base_calculations
-            ),
-            combined_results AS (
-              -- Combine segments and totals
-              SELECT *, 0 as sort_order FROM segment_metrics
+                segment,
+                AVG(field1) as avg1,
+                SUM(field2) as sum2,
+                COUNT(*) as count
+              FROM base_metrics
+              GROUP BY segment
               UNION ALL
-              SELECT *, 1 as sort_order FROM total_metrics
+              SELECT 
+                'Total' as segment,
+                AVG(field1) as avg1,
+                SUM(field2) as sum2,
+                COUNT(*) as count
+              FROM base_metrics
             )
-            -- Final selection with ordering
-            SELECT * FROM combined_results
-            ORDER BY sort_order, segment_name;
+            SELECT * FROM segment_metrics
+            ORDER BY CASE 
+              WHEN segment = 'Total' THEN 'Z' 
+              ELSE segment 
+            END;
           * Never use ORDER BY within UNIONed queries
           * Add sort columns for segment ordering
           * Keep aggregation logic consistent across segments
