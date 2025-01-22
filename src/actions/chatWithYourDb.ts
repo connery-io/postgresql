@@ -247,15 +247,47 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * For sums, use SUM(CAST(column AS NUMERIC))
           * For counts, use COUNT(*) when possible
         - For aggregations and grouping:
-          * Calculate base values before aggregating
-          * Use CTEs for multi-level calculations
-          * Never use aggregate functions in GROUP BY
-          * Group only by raw columns or simple CASE statements
-        - When combining results (top/bottom rankings):
-          * Use WITH clauses for better readability
-          * Ensure column names and types match in UNION queries
-          * Add labels/indicators to distinguish top vs bottom results
-          * Use row_number() for rankings when needed
+          * Calculate base values before aggregating using CTEs:
+            WITH base_calculations AS (
+              SELECT 
+                order_id,
+                CAST(value AS NUMERIC) as value,
+                CAST(discount AS NUMERIC) as discount
+              FROM orders
+            ),
+            segment_metrics AS (
+              SELECT
+                CASE WHEN discount > 0 THEN 'With Discount' 
+                     ELSE 'Without Discount' 
+                END as segment,
+                COUNT(*) as order_count,
+                AVG(value) as avg_value,
+                SUM(value) as total_value,
+                AVG(discount) as avg_discount,
+                SUM(discount) as total_discount
+              FROM base_calculations
+              GROUP BY 
+                CASE WHEN discount > 0 THEN 'With Discount' 
+                     ELSE 'Without Discount' 
+                END
+            )
+            SELECT * FROM segment_metrics;
+          * Never use calculated fields or aggregates in GROUP BY
+          * Pre-calculate complex values in earlier CTEs
+          * Use simple CASE statements for grouping
+          * Structure multi-level aggregations:
+            1. Base calculations (raw values, type casting)
+            2. Record-level calculations (per order/item)
+            3. Group-level aggregations (averages, totals)
+          * For percentage calculations:
+            - Calculate components separately
+            - Use NULLIF for division to avoid divide by zero
+            - Example:
+              ROUND(
+                CAST(discount_value AS NUMERIC) * 100.0 / 
+                NULLIF(CAST(total_value AS NUMERIC), 0),
+                2
+              ) as discount_percentage
         - For statistical analysis and outliers:
           * Use CTEs to calculate statistics separately
           * Calculate quartiles using percentile_cont without OVER clause
