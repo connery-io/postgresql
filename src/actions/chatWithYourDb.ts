@@ -322,18 +322,68 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Verify parent-child relationships using schema constraints
         - For segmentation analysis:
           * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
-          * Include total counts/values for verification:
-            - Use UNION ALL to add a "Total" segment
-            - Calculate totals without segmentation criteria
-            - Place total row last using ORDER BY
-            - Example structure:
-              WITH base_metrics AS (...),
-              segmented AS (...),
-              totals AS (...)
-              SELECT ... FROM segmented
+          * For combining segments with totals, use this pattern:
+            WITH segment_data AS (
+              SELECT 
+                CASE WHEN condition THEN 'Segment A' ELSE 'Segment B' END as segment,
+                metrics...
+              FROM source_table
+              GROUP BY CASE WHEN condition THEN 'Segment A' ELSE 'Segment B' END
+            ),
+            total_data AS (
+              SELECT 
+                'Total' as segment,
+                metrics...
+              FROM source_table
+            )
+            SELECT * FROM segment_data
+            UNION ALL
+            SELECT * FROM total_data
+            ORDER BY 
+              CASE 
+                WHEN segment = 'Total' THEN 2
+                ELSE 1
+              END,
+              segment;
+          * For segment comparisons:
+            - Calculate all metrics within each CTE
+            - Use clear segment names
+            - Ensure consistent column types across UNION
+            - Place ORDER BY only in the final query
+            - Example structure for comparison analysis:
+              WITH metrics_by_segment AS (
+                SELECT
+                  CASE 
+                    WHEN condition THEN 'With Condition'
+                    ELSE 'Without Condition'
+                  END as segment,
+                  COUNT(*) as count,
+                  AVG(CAST(value AS NUMERIC)) as avg_value,
+                  SUM(CAST(value AS NUMERIC)) as total_value
+                FROM source_table
+                GROUP BY 
+                  CASE 
+                    WHEN condition THEN 'With Condition'
+                    ELSE 'Without Condition'
+                  END
+              ),
+              total_metrics AS (
+                SELECT
+                  'Total' as segment,
+                  COUNT(*) as count,
+                  AVG(CAST(value AS NUMERIC)) as avg_value,
+                  SUM(CAST(value AS NUMERIC)) as total_value
+                FROM source_table
+              )
+              SELECT * FROM metrics_by_segment
               UNION ALL
-              SELECT 'Total' as segment, ... FROM totals
-              ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
+              SELECT * FROM total_metrics
+              ORDER BY 
+                CASE 
+                  WHEN segment = 'Total' THEN 2 
+                  ELSE 1 
+                END,
+                segment;
           * Add validation comments showing segment math
           * Ensure segment values sum up to totals
         - For segment-level correlations:
