@@ -337,24 +337,25 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Add validation comments showing segment math
           * Ensure segment values sum up to totals
         
-        - For segmentation with totals:
-          * Structure queries with proper ordering:
-            - Wrap segmented results and totals in a CTE
-            - Apply final ordering outside the UNION
-            - Example pattern:
-              WITH base_data AS (...),
-              segment_calcs AS (...),
-              total_calcs AS (...),
-              combined_results AS (
-                SELECT ..., 0 as sort_order FROM segment_calcs
-                UNION ALL
-                SELECT ..., 1 as sort_order FROM total_calcs
-              )
-              SELECT ... FROM combined_results
-              ORDER BY sort_order
-          * Add numeric sort_order column for reliable ordering
-          * Keep ORDER BY outside of UNIONed queries
-          * Document segment definitions in comments
+        - For segmented analysis with totals:
+          * Structure as:
+            WITH base_metrics AS (
+              -- Calculate base metrics
+              SELECT ... FROM source_table
+            ),
+            all_segments AS (
+              SELECT 'With Discounts' as segment, 0 as sort_order, ...
+                FROM base_metrics WHERE condition
+              UNION ALL
+              SELECT 'No Discounts' as segment, 1 as sort_order, ...
+                FROM base_metrics WHERE NOT condition
+              UNION ALL
+              SELECT 'Total' as segment, 2 as sort_order, ...
+                FROM base_metrics
+            )
+            SELECT * FROM all_segments ORDER BY sort_order;
+          * Keep ORDER BY only in final SELECT
+          * Add sort_order for segment ordering
         
         - For statistical calculations:
           * Calculate correlations in steps:
