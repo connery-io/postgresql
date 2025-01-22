@@ -357,7 +357,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           * Document segment definitions in comments
         
         - For statistical calculations:
-          * Structure correlation calculations:
+          * Calculate correlations in steps:
             WITH base_metrics AS (
               SELECT key_id,
                 AVG(value1) as metric1,
@@ -365,18 +365,25 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
               FROM source_table
               GROUP BY key_id
             ),
-            stats AS (
+            means AS (
               SELECT 
-                COUNT(*) as n,
                 AVG(metric1) as avg1,
-                AVG(metric2) as avg2,
-                STDDEV(metric1) as stddev1,
-                STDDEV(metric2) as stddev2,
-                SUM((metric1 - AVG(metric1) OVER()) * (metric2 - AVG(metric2) OVER())) / (COUNT(*) - 1) as covar
+                AVG(metric2) as avg2
               FROM base_metrics
+            ),
+            deviations AS (
+              SELECT 
+                base_metrics.*,
+                means.avg1,
+                means.avg2,
+                (metric1 - means.avg1) * (metric2 - means.avg2) as deviation_product,
+                POWER(metric1 - means.avg1, 2) as dev1_squared,
+                POWER(metric2 - means.avg2, 2) as dev2_squared
+              FROM base_metrics CROSS JOIN means
             )
-            SELECT covar/(stddev1 * stddev2) as correlation
-            FROM stats;
+            SELECT 
+              SUM(deviation_product) / SQRT(SUM(dev1_squared) * SUM(dev2_squared)) as correlation
+            FROM deviations;
         
         - For complex aggregations with segments:
           * Structure multi-level aggregations properly:
