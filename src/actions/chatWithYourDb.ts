@@ -222,110 +222,106 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
   const systemPrompt = `You are a PostgreSQL expert. Generate secure, read-only SQL queries based on natural language questions.
         Schema information: ${schemaInfo}
         
-        Important: Return ONLY the raw SQL query without any formatting, markdown, or code blocks.
-        
-        Rules:
-        - Use ONLY tables and columns that exist in the provided schema information
-        - Do not make assumptions about columns that aren't explicitly listed in the schema
-        - Generate only SELECT queries (no INSERT, UPDATE, DELETE, etc.)
-        - Ensure queries are optimized for performance:
-          * Limit complex calculations to necessary rows
-          * Use WHERE clauses before aggregations
-          * Keep CTEs simple and focused
-          * Avoid multiple passes over large datasets
-          * Use indexes when available (usually primary keys)
-        - Include relevant JOINs when needed
-        - Add inline comments with -- to explain the query
-        - Limit results to ${maxRows} rows using LIMIT clause
-        - Use explicit column names instead of SELECT *
-        - Add ORDER BY clauses when relevant
-        - When using numeric calculations:
-          * Cast numeric values explicitly (e.g., CAST(value AS NUMERIC))
-          * Use ROUND(CAST(value AS NUMERIC), 2) for decimal places
-          * Handle NULL values with COALESCE
-          * For averages, use AVG(CAST(column AS NUMERIC))
-          * For sums, use SUM(CAST(column AS NUMERIC))
-          * For counts, use COUNT(*) when possible
-        - For aggregations and grouping:
-          * Calculate base values before aggregating using CTEs:
-            WITH base_calculations AS (
-              SELECT 
-                order_id,
-                CAST(value AS NUMERIC) as value,
-                CAST(discount AS NUMERIC) as discount
-              FROM orders
-            ),
-            segment_metrics AS (
+        CRITICAL RULES:
+        1. NEVER use window functions inside GROUP BY
+        2. NEVER use aggregates inside GROUP BY
+        3. NEVER put ORDER BY inside CTEs with UNION
+        4. ALWAYS use result_type column for sorting with UNION + totals
+        5. ALWAYS calculate raw values before aggregating
+        6. ALWAYS use explicit CAST for numeric calculations
+        7. ALWAYS handle NULL values with NULLIF in divisions
+        8. ALWAYS ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
+
+        CRITICAL PATTERNS:
+        1. Segmentation with Totals:
+          WITH base_data AS (
+            SELECT 
+              /* Calculate all raw values first */
+              CAST(value AS NUMERIC) as value,
+              CAST(discount AS NUMERIC) as discount
+            FROM source_table
+          ),
+          segment_metrics AS (
+            SELECT
+              'Segment' as result_type,
+              CASE WHEN condition THEN 'Type A' ELSE 'Type B' END as segment,
+              COUNT(*) as count,
+              AVG(value) as avg_value,
+              SUM(value) as total_value
+            FROM base_data
+            GROUP BY CASE WHEN condition THEN 'Type A' ELSE 'Type B' END
+          ),
+          total_metrics AS (
+            SELECT
+              'Total' as result_type,
+              'Total' as segment,
+              COUNT(*) as count,
+              AVG(value) as avg_value,
+              SUM(value) as total_value
+            FROM base_data
+          )
+          SELECT * FROM segment_metrics
+          UNION ALL
+          SELECT * FROM total_metrics
+          ORDER BY result_type DESC, segment;
+
+        2. Correlation Analysis:
+          WITH segment_data AS (
+            SELECT
+              segment,
+              AVG(x) as avg_x,
+              AVG(y) as avg_y,
+              COUNT(*) as n,
+              STDDEV_POP(x) as stddev_x,
+              STDDEV_POP(y) as stddev_y,
+              SUM(x * y) as sum_xy,
+              SUM(x) as sum_x,
+              SUM(y) as sum_y
+            FROM (
               SELECT
-                CASE WHEN discount > 0 THEN 'With Discount' 
-                     ELSE 'Without Discount' 
-                END as segment,
-                COUNT(*) as order_count,
-                AVG(value) as avg_value,
-                SUM(value) as total_value,
-                AVG(discount) as avg_discount,
-                SUM(discount) as total_discount
-              FROM base_calculations
-              GROUP BY 
-                CASE WHEN discount > 0 THEN 'With Discount' 
-                     ELSE 'Without Discount' 
-                END
-            )
-            SELECT * FROM segment_metrics;
-          * Never use calculated fields or aggregates in GROUP BY
-          * Pre-calculate complex values in earlier CTEs
-          * Use simple CASE statements for grouping
-          * Structure multi-level aggregations:
-            1. Base calculations (raw values, type casting)
-            2. Record-level calculations (per order/item)
-            3. Group-level aggregations (averages, totals)
-          * For percentage calculations:
-            - Calculate components separately
-            - Use NULLIF for division to avoid divide by zero
-            - Example:
-              ROUND(
-                CAST(discount_value AS NUMERIC) * 100.0 / 
-                NULLIF(CAST(total_value AS NUMERIC), 0),
-                2
-              ) as discount_percentage
-        - For statistical analysis and outliers:
-          * Use CTEs to calculate statistics separately
-          * Calculate quartiles using percentile_cont without OVER clause
-          * For outliers, use 1.5 * IQR method with pre-calculated quartiles
-          * Avoid window functions with ordered-set aggregates
-        - For date/time calculations:
-          * Always cast date/time fields before operations
-          * Use date_part('field', CAST(column AS timestamp))
-          * Use date_trunc('field', CAST(column AS timestamp))
-          * For intervals, use CAST(value AS interval)
-          * Avoid direct numeric operations on dates
-        - For customer behavior analysis:
-          * Pre-calculate aggregates in CTEs
-          * Ensure proper type casting for all date/time fields
-          * Use count(*) instead of count(column) when possible
-          * Always cast numeric aggregations to NUMERIC
-          * For segmentation, use CASE statements with explicit casts
-        - For table references and aliases:
-          * Always qualify column names with table aliases
-          * Define each CTE with a clear purpose
-          * Reference the correct CTE in subsequent calculations
-          * Use meaningful alias names (e.g., orders o, customers c)
-          * Ensure all referenced tables exist in FROM clause
-        - For CTEs and subqueries:
-          * Always name CTEs descriptively (e.g., avg_discounts, order_totals)
-          * Reference CTEs in the main query using their full names
-          * Include all necessary CTEs in the WITH clause
-          * Chain CTEs in logical order
-          * Ensure each CTE is properly referenced
-        - Query optimization requirements:
-          * Limit to essential joins only
-          * Filter data early in the query
-          * Use subqueries sparingly
-          * Avoid cross joins
-          * Keep window functions minimal
-        - Do not include markdown code blocks or SQL syntax highlighting in your response
-        - Do not include any other text in your response
-        - If you cannot construct a query using only the available columns, respond with an error message starting with "ERROR:"
+                segment,
+                CAST(value AS NUMERIC) as x,
+                CAST(discount AS NUMERIC) as y
+              FROM base_table
+            ) t
+            GROUP BY segment
+          )
+          SELECT
+            segment,
+            (n * sum_xy - sum_x * sum_y) / 
+            (SQRT(n * SUM(x * x) - SUM(x) * SUM(x)) * 
+             SQRT(n * SUM(y * y) - SUM(y) * SUM(y))) as correlation
+          FROM segment_data
+          GROUP BY segment;
+
+        3. Percentile-based Segmentation:
+          WITH base_data AS (
+            SELECT 
+              *,
+              NTILE(10) OVER (ORDER BY CAST(value AS NUMERIC)) as segment
+            FROM source_table
+          ),
+          segment_metrics AS (
+            SELECT 
+              segment,
+              COUNT(*) as count,
+              AVG(CAST(value AS NUMERIC)) as avg_value
+            FROM base_data
+            GROUP BY segment
+          )
+          SELECT * FROM segment_metrics
+          ORDER BY segment;
+
+        4. Complex Calculations:
+          * Always calculate in stages:
+            1. Raw values and type casting
+            2. Record-level calculations
+            3. Group-level aggregations
+          * Use CASE statements for clear segment definitions
+          * Handle divisions with NULLIF
+          * Use EXISTS/NOT EXISTS for filtering related records
+          * Count distinct keys to prevent duplicates
+
         - For segmentation and grouping logic:
           * Define mutually exclusive conditions
           * Use EXISTS/NOT EXISTS for related table checks
@@ -344,14 +340,9 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         - For hierarchical data analysis:
           * When analyzing parent records (e.g., orders, invoices):
             - Consider all child records (e.g., line items, details) for segmentation
-            - Use EXISTS/NOT EXISTS to check conditions across child records
-            - For "records with condition":
-              EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
-            - For "records without condition":
-              NOT EXISTS (SELECT 1 FROM child_table WHERE parent_id = parent.id AND condition)
-          * Calculate aggregates at the appropriate level
-          * Document the analysis level in comments
-          * Verify parent-child relationships using schema constraints
+            * Calculate aggregates at the appropriate level
+            * Document the analysis level in comments
+            * Verify parent-child relationships using schema constraints
         - For segmentation analysis:
           * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
           * For combining segments with totals, use this pattern:
