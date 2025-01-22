@@ -221,7 +221,15 @@ async function getSchemaInfo(client: pkg.Client): Promise<string> {
 async function generateSqlQuery(apiKey: string, schemaInfo: string, question: string, maxRows: number): Promise<string> {
   const systemPrompt = `You are a PostgreSQL expert. Generate secure, read-only SQL queries based on natural language questions.
         Schema information: ${schemaInfo}
-        
+
+        RESPONSE FORMAT:
+        - Return ONLY the raw SQL query
+        - NO explanations
+        - NO markdown
+        - NO comments about what the query does
+        - NO "Here's the query:" or similar prefixes
+        - ONLY the SQL code itself
+
         CRITICAL RULES:
         1. NEVER use window functions inside GROUP BY
         2. NEVER use aggregates inside GROUP BY
@@ -231,12 +239,23 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         6. ALWAYS use explicit CAST for numeric calculations
         7. ALWAYS handle NULL values with NULLIF in divisions
         8. ALWAYS ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
+        9. ALWAYS use EXISTS for checking related records
+        10. ALWAYS limit results using: LIMIT ${maxRows};
 
         CRITICAL PATTERNS:
-        1. Segmentation with Totals:
+        1. Basic Counts with Conditions:
+          WITH metrics AS (
+            SELECT
+              COUNT(*) as total_count,
+              COUNT(DISTINCT order_id) as unique_orders,
+              SUM(CASE WHEN condition THEN 1 ELSE 0 END) as matching_count
+            FROM source_table
+          )
+          SELECT * FROM metrics;
+
+        2. Segmentation with Totals:
           WITH base_data AS (
             SELECT 
-              /* Calculate all raw values first */
               CAST(value AS NUMERIC) as value,
               CAST(discount AS NUMERIC) as discount
             FROM source_table
@@ -265,7 +284,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           SELECT * FROM total_metrics
           ORDER BY result_type DESC, segment;
 
-        2. Correlation Analysis:
+        3. Correlation Analysis:
           WITH segment_data AS (
             SELECT
               segment,
@@ -294,7 +313,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           FROM segment_data
           GROUP BY segment;
 
-        3. Percentile-based Segmentation:
+        4. Percentile-based Segmentation:
           WITH base_data AS (
             SELECT 
               *,
@@ -312,124 +331,21 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           SELECT * FROM segment_metrics
           ORDER BY segment;
 
-        4. Complex Calculations:
-          * Always calculate in stages:
-            1. Raw values and type casting
-            2. Record-level calculations
-            3. Group-level aggregations
-          * Use CASE statements for clear segment definitions
-          * Handle divisions with NULLIF
-          * Use EXISTS/NOT EXISTS for filtering related records
-          * Count distinct keys to prevent duplicates
-
-        - For segmentation and grouping logic:
-          * Define mutually exclusive conditions
-          * Use EXISTS/NOT EXISTS for related table checks
-          * Avoid counting same records multiple times
-          * For "any" conditions, use EXISTS subqueries
-          * For "all" conditions, use NOT EXISTS with negation
-          * Use CASE WHEN for clear segment definitions
-          * Verify segments are complete and non-overlapping
-          * Document segment logic in comments
-        - For aggregations across related tables:
-          * Use EXISTS for "at least one" relationships
-          * Use NOT EXISTS for "none" relationships
-          * Avoid JOIN when checking existence is sufficient
-          * Count distinct primary keys to prevent duplicates
-          * Verify totals match expected row counts
-        - For hierarchical data analysis:
-          * When analyzing parent records (e.g., orders, invoices):
-            - Consider all child records (e.g., line items, details) for segmentation
-            * Calculate aggregates at the appropriate level
-            * Document the analysis level in comments
-            * Verify parent-child relationships using schema constraints
-        - For segmentation analysis:
-          * Always ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
-          * For combining segments with totals, use this pattern:
-            WITH segment_data AS (
-              SELECT 
-                CASE WHEN condition THEN 'Segment A' ELSE 'Segment B' END as segment,
-                metrics...
-              FROM source_table
-              GROUP BY CASE WHEN condition THEN 'Segment A' ELSE 'Segment B' END
-            ),
-            total_data AS (
-              SELECT 
-                'Total' as segment,
-                metrics...
-              FROM source_table
-            )
-            SELECT * FROM segment_data
-            UNION ALL
-            SELECT * FROM total_data
-            ORDER BY 
-              CASE 
-                WHEN segment = 'Total' THEN 2
-                ELSE 1
-              END,
-              segment;
-          * For segment comparisons:
-            - Calculate all metrics within each CTE
-            - Use clear segment names
-            - Ensure consistent column types across UNION
-            - Place ORDER BY only in the final query
-            - Example structure for comparison analysis:
-              WITH metrics_by_segment AS (
-                SELECT
-                  CASE 
-                    WHEN condition THEN 'With Condition'
-                    ELSE 'Without Condition'
-                  END as segment,
-                  COUNT(*) as count,
-                  AVG(CAST(value AS NUMERIC)) as avg_value,
-                  SUM(CAST(value AS NUMERIC)) as total_value
-                FROM source_table
-                GROUP BY 
-                  CASE 
-                    WHEN condition THEN 'With Condition'
-                    ELSE 'Without Condition'
-                  END
-              ),
-              total_metrics AS (
-                SELECT
-                  'Total' as segment,
-                  COUNT(*) as count,
-                  AVG(CAST(value AS NUMERIC)) as avg_value,
-                  SUM(CAST(value AS NUMERIC)) as total_value
-                FROM source_table
-              )
-              SELECT * FROM metrics_by_segment
-              UNION ALL
-              SELECT * FROM total_metrics
-              ORDER BY 
-                CASE 
-                  WHEN segment = 'Total' THEN 2 
-                  ELSE 1 
-                END,
-                segment;
-          * Add validation comments showing segment math
-          * Ensure segment values sum up to totals
-        - For segment-level correlations:
-          * Calculate segments in steps:
-            WITH base_data AS (
-              SELECT *,
-                NTILE(N) OVER (ORDER BY value) as segment
-              FROM source_table
-            ),
-            metrics AS (
-              SELECT 
-                segment,
-                COUNT(*) as count,
-                AVG(value1) as avg1,
-                AVG(value2) as avg2
-              FROM base_data
-              GROUP BY segment
-            )
-            SELECT * FROM metrics
-            ORDER BY segment;
-          * Never use window functions in GROUP BY or aggregates
-          * Calculate NTILE() before any aggregations
-          * Use simple GROUP BY on pre-calculated segments`;
+        5. Existence Checks:
+          WITH order_metrics AS (
+            SELECT
+              o.order_id,
+              EXISTS (
+                SELECT 1 
+                FROM order_discounts od 
+                WHERE od.order_id = o.order_id
+              ) as has_discount
+            FROM orders o
+          )
+          SELECT
+            COUNT(*) as total_orders,
+            SUM(CASE WHEN has_discount THEN 1 ELSE 0 END) as orders_with_discount
+          FROM order_metrics;`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
