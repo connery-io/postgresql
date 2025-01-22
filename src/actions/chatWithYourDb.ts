@@ -336,45 +336,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
               ORDER BY CASE WHEN segment = 'Total' THEN 1 ELSE 0 END
           * Add validation comments showing segment math
           * Ensure segment values sum up to totals
-        
-        - For segmented aggregations:
-          * Structure as:
-            WITH base_metrics AS (
-              -- First calculate row-level metrics
-              SELECT 
-                CASE WHEN condition THEN 'A' ELSE 'B' END as segment,
-                field1,
-                field2,
-                field3
-              FROM source_table
-            ),
-            segment_metrics AS (
-              -- Then aggregate by segment
-              SELECT 
-                segment,
-                AVG(field1) as avg1,
-                SUM(field2) as sum2,
-                COUNT(*) as count
-              FROM base_metrics
-              GROUP BY segment
-              UNION ALL
-              SELECT 
-                'Total' as segment,
-                AVG(field1) as avg1,
-                SUM(field2) as sum2,
-                COUNT(*) as count
-              FROM base_metrics
-            )
-            SELECT * FROM segment_metrics
-            ORDER BY CASE 
-              WHEN segment = 'Total' THEN 'Z' 
-              ELSE segment 
-            END;
-          * Never use ORDER BY within UNIONed queries
-          * Add sort columns for segment ordering
-          * Keep aggregation logic consistent across segments
-
-        - For percentile-based segmentation:
+        - For segment-level correlations:
           * Calculate segments in steps:
             WITH base_data AS (
               SELECT *,
