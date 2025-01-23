@@ -341,38 +341,46 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
          * WRONG: Mixing window and aggregate functions directly
          * RIGHT: Use staged CTEs to build up calculations
        - For correlations and statistical measures:
-         * Step 1: Calculate base metrics per entity
-         * Step 2: Calculate statistical components
+         * Step 1: Calculate base metrics per entity with unique names
+         * Step 2: Calculate statistical components with qualified references
          * Step 3: Combine into final formula
+       - For column references:
+         * WRONG: Using ambiguous column names across CTEs
+         * RIGHT: Using unique or qualified column names
+         * RIGHT: Using table aliases for clarity
        Example pattern for correlation:
          WITH base_metrics AS (
-           -- First get metrics per entity
+           -- First get metrics per entity with unique names
            SELECT 
              parent_id,
-             SUM(amount) / COUNT(*) as avg_amount,
-             SUM(attribute) / COUNT(*) as avg_attribute
+             SUM(amount) / NULLIF(COUNT(*), 0) as entity_avg_amount,
+             SUM(attribute) / NULLIF(COUNT(*), 0) as entity_avg_attribute
            FROM details
            GROUP BY parent_id
          ),
          stats AS (
-           -- Then calculate statistical components
+           -- Then calculate statistical components with unique names
            SELECT
              COUNT(*) as n,
-             AVG(avg_amount) as avg_x,
-             AVG(avg_attribute) as avg_y,
-             STDDEV_POP(avg_amount) as stddev_x,
-             STDDEV_POP(avg_attribute) as stddev_y,
-             SUM((avg_amount * avg_attribute)) as sum_xy,
-             SUM(avg_amount) as sum_x,
-             SUM(avg_attribute) as sum_y
+             AVG(entity_avg_amount) as population_avg_x,
+             AVG(entity_avg_attribute) as population_avg_y,
+             STDDEV_POP(entity_avg_amount) as population_stddev_x,
+             STDDEV_POP(entity_avg_attribute) as population_stddev_y,
+             SUM(entity_avg_amount * entity_avg_attribute) as sum_xy,
+             SUM(entity_avg_amount) as sum_x,
+             SUM(entity_avg_attribute) as sum_y
            FROM base_metrics
          )
-         -- Finally combine into correlation formula
+         -- Finally combine into correlation formula with qualified references
          SELECT 
-           (n * sum_xy - sum_x * sum_y) /
-           (SQRT(n * SUM(POWER(avg_amount, 2)) - POWER(sum_x, 2)) *
-            SQRT(n * SUM(POWER(avg_attribute, 2)) - POWER(sum_y, 2))) as correlation
-         FROM stats, base_metrics;
+           (stats.n * stats.sum_xy - stats.sum_x * stats.sum_y) /
+           NULLIF(
+             (SQRT(stats.n * SUM(POWER(bm.entity_avg_amount, 2)) - POWER(stats.sum_x, 2)) *
+              SQRT(stats.n * SUM(POWER(bm.entity_avg_attribute, 2)) - POWER(stats.sum_y, 2))),
+             0
+           ) as correlation_coefficient
+         FROM stats
+         CROSS JOIN base_metrics bm;
 
     IMPLEMENTATION REQUIREMENTS:
     - Generate only SELECT queries (no modifications)
@@ -697,38 +705,46 @@ function formatQueryResponse(sqlQuery: string): string {
  *       * WRONG: Mixing window and aggregate functions directly
  *       * RIGHT: Use staged CTEs to build up calculations
  *     - For correlations and statistical measures:
- *       * Step 1: Calculate base metrics per entity
- *       * Step 2: Calculate statistical components
+ *       * Step 1: Calculate base metrics per entity with unique names
+ *       * Step 2: Calculate statistical components with qualified references
  *       * Step 3: Combine into final formula
+ *     - For column references:
+ *       * WRONG: Using ambiguous column names across CTEs
+ *       * RIGHT: Using unique or qualified column names
+ *       * RIGHT: Using table aliases for clarity
  *     Example pattern for correlation:
  *       WITH base_metrics AS (
- *         -- First get metrics per parent
+ *         -- First get metrics per entity with unique names
  *         SELECT 
  *           parent_id,
- *           SUM(amount) / COUNT(*) as avg_amount,
- *           SUM(attribute) / COUNT(*) as avg_attribute
+ *           SUM(amount) / NULLIF(COUNT(*), 0) as entity_avg_amount,
+ *           SUM(attribute) / NULLIF(COUNT(*), 0) as entity_avg_attribute
  *         FROM details
  *         GROUP BY parent_id
  *       ),
  *       stats AS (
- *         -- Then calculate statistical components
+ *         -- Then calculate statistical components with unique names
  *         SELECT
  *           COUNT(*) as n,
- *           AVG(avg_amount) as avg_x,
- *           AVG(avg_attribute) as avg_y,
- *           STDDEV_POP(avg_amount) as stddev_x,
- *           STDDEV_POP(avg_attribute) as stddev_y,
- *           SUM((avg_amount * avg_attribute)) as sum_xy,
- *           SUM(avg_amount) as sum_x,
- *           SUM(avg_attribute) as sum_y
+ *           AVG(entity_avg_amount) as population_avg_x,
+ *           AVG(entity_avg_attribute) as population_avg_y,
+ *           STDDEV_POP(entity_avg_amount) as population_stddev_x,
+ *           STDDEV_POP(entity_avg_attribute) as population_stddev_y,
+ *           SUM(entity_avg_amount * entity_avg_attribute) as sum_xy,
+ *           SUM(entity_avg_amount) as sum_x,
+ *           SUM(entity_avg_attribute) as sum_y
  *         FROM base_metrics
  *       )
- *       -- Finally combine into correlation formula
+ *       -- Finally combine into correlation formula with qualified references
  *       SELECT 
- *         (n * sum_xy - sum_x * sum_y) /
- *         (SQRT(n * SUM(POWER(avg_amount, 2)) - POWER(sum_x, 2)) *
- *          SQRT(n * SUM(POWER(avg_attribute, 2)) - POWER(sum_y, 2))) as correlation
- *       FROM stats, base_metrics;
+ *         (stats.n * stats.sum_xy - stats.sum_x * stats.sum_y) /
+ *         NULLIF(
+ *           (SQRT(stats.n * SUM(POWER(bm.entity_avg_amount, 2)) - POWER(stats.sum_x, 2)) *
+ *            SQRT(stats.n * SUM(POWER(bm.entity_avg_attribute, 2)) - POWER(stats.sum_y, 2))),
+ *            0
+ *         ) as correlation_coefficient
+ *       FROM stats
+ *       CROSS JOIN base_metrics bm;
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
