@@ -259,10 +259,40 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - Group by resulting values only
 
     7. Multi-level Aggregations:
-      - Always aggregate at the correct granularity level
-      - Use CTEs to build up from line items to higher levels
-      - Verify aggregation logic maintains data consistency
-      - Use DISTINCT only when necessary
+      - Always use hierarchical aggregation for nested data:
+        * First aggregate at the detail level to parent level
+        * Then aggregate parents to segments
+      - For entity-level averages:
+        * Calculate totals per parent entity first
+        * Then average the parent totals
+      - For entity grouping:
+        * Determine entity characteristics at parent level using MAX/MIN
+        * Group by these parent-level attributes
+      - For MECE (Mutually Exclusive, Collectively Exhaustive) results:
+        * Ensure segments don't overlap by using parent-level flags
+        * Verify segment totals match overall totals
+        * Use parent-level COUNT instead of detail-level COUNT
+      Example pattern:
+        WITH detail_totals AS (
+          SELECT 
+            parent_id,
+            SUM(quantity) as items_total,
+            SUM(amount) as total_amount,
+            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute
+          FROM detail_table
+          GROUP BY parent_id
+        ),
+        parent_segments AS (
+          SELECT
+            CASE WHEN has_attribute = 1 THEN 'With Attribute' 
+                 ELSE 'Without Attribute' END as segment,
+            COUNT(*) as total_parents,
+            AVG(items_total) as avg_items,
+            SUM(total_amount) as total_value,
+            AVG(total_amount) as avg_value
+          FROM detail_totals
+          GROUP BY has_attribute
+        )
 
     8. Query Optimization:
       - Keep queries as simple as possible while meeting requirements
@@ -407,29 +437,37 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Group by resulting segment/value
  *    - Never use window function results directly in GROUP BY
  * 
- * 7. "Non-MECE Results in Aggregations"
- *    Problem: Mixing order-level and line-item-level calculations
- *    Solution: 
- *    - Always aggregate at the correct level first
- *    - For order-level metrics:
- *      * First aggregate line items per order
- *      * Then aggregate across orders
- *    - Use appropriate DISTINCT counts
- *    - Verify totals match expected counts
- *    Example fix:
- *      Instead of:
- *        SELECT COUNT(DISTINCT order_id) FROM order_details
- *      Use:
- *        WITH order_metrics AS (
- *          SELECT 
- *            order_id,
- *            SUM(quantity) as total_quantity,
- *            SUM(unit_price * quantity) as total_value,
- *            MAX(CASE WHEN discount > 0 THEN 1 ELSE 0 END) as has_discount
- *          FROM order_details
- *          GROUP BY order_id
- *        )
- *        SELECT COUNT(*) FROM order_metrics
+ * 7. "Non-MECE Results in Multi-Level Aggregations"
+ *     Problem: Mixing detail-level and parent-level calculations
+ *     Solution: 
+ *     - Always use two-step aggregation for hierarchical data:
+ *       1. First aggregate details to parent level
+ *       2. Then aggregate parents to segments
+ *     - For parent entity characteristics:
+ *       * Use MAX() or similar to get single value per parent
+ *     - For averages:
+ *       * Calculate totals per parent first
+ *       * Then average the parent totals
+ *     Example fix:
+ *       Instead of:
+ *         SELECT AVG(quantity * amount)
+ *         FROM detail_table
+ *         GROUP BY has_attribute
+ *       Use:
+ *         WITH parent_totals AS (
+ *           SELECT parent_id,
+ *                  SUM(quantity * amount) as parent_value
+ *           FROM detail_table
+ *           GROUP BY parent_id
+ *         )
+ *         SELECT AVG(parent_value)
+ *         FROM parent_totals
+ *     Testing:
+ *     - Compare total parent count with distinct parent_ids
+ *     - Verify sum of segments equals total
+ *     - Check if parent-level metrics match when calculated different ways
+ *     - Test with parents having multiple detail records
+ *     - Test with parents having mixed attribute values in details
  * 
  * 8. "Overloaded Error"
  *    Problem: Query too complex or taking too long
