@@ -287,38 +287,51 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         * Second CTE: Segment parents based on characteristics
         * Final CTE: Calculate overall totals if needed
       - For entity-level averages:
-        * WRONG: AVG(detail.value)
-        * RIGHT: AVG(parent_totals.total_value)
+        * WRONG: AVG(detail.value) directly from details
+        * RIGHT: AVG(parent_totals.total_value) from parent-level CTE
       - For entity grouping:
         * WRONG: GROUP BY detail.attribute > 0
         * RIGHT: GROUP BY parent_level.has_attribute
       - For MECE (Mutually Exclusive, Collectively Exhaustive) results:
-        * WRONG: COUNT(DISTINCT parent_id) directly from details
-        * RIGHT: COUNT(*) from parent-level CTE
-      Example pattern:
-        WITH detail_totals AS (
-          -- First aggregate all details to parent level
+        * WRONG: Segmenting at detail level then counting parents
+        * RIGHT: First aggregate to parent level, then segment
+      Example pattern for segmentation:
+        WITH parent_totals AS (
+          -- First aggregate ALL metrics to parent level
           SELECT 
             parent_id,
             SUM(quantity) as total_quantity,
             SUM(amount) as total_amount,
-            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute,
-            SUM(amount * attribute) as attribute_amount
+            SUM(amount * attribute) as attribute_amount,
+            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute
           FROM detail_table
           GROUP BY parent_id
         ),
-        parent_segments AS (
+        segments AS (
           -- Then segment based on parent-level characteristics
           SELECT
             CASE WHEN has_attribute = 1 THEN 'With Attribute' 
                  ELSE 'Without Attribute' END as segment,
             COUNT(*) as total_parents,
-            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_quantity,
-            ROUND(CAST(AVG(total_amount) AS NUMERIC), 2) as avg_amount,
-            ROUND(CAST(AVG(attribute_amount) AS NUMERIC), 2) as avg_attr_amount,
-            ROUND(CAST(SUM(attribute_amount) * 100.0 / NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
-          FROM detail_totals
+            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_items,
+            ROUND(CAST(SUM(total_amount) AS NUMERIC), 2) as total_value,
+            ROUND(CAST(SUM(attribute_amount) AS NUMERIC), 2) as attr_value,
+            ROUND(CAST(SUM(attribute_amount) * 100.0 / 
+                  NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
+          FROM parent_totals
           GROUP BY has_attribute
+          
+          UNION ALL
+          
+          SELECT 
+            'Total' as segment,
+            COUNT(*) as total_parents,
+            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_items,
+            ROUND(CAST(SUM(total_amount) AS NUMERIC), 2) as total_value,
+            ROUND(CAST(SUM(attribute_amount) AS NUMERIC), 2) as attr_value,
+            ROUND(CAST(SUM(attribute_amount) * 100.0 / 
+                  NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
+          FROM parent_totals
         )
 
     8. Query Optimization:
@@ -498,41 +511,42 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Never use window function results directly in GROUP BY
  * 
  * 7. "Non-MECE Results in Multi-Level Aggregations"
- *    Problem: Incorrect aggregation levels leading to wrong averages and counts
+ *    Problem: Incorrect aggregation levels leading to wrong segment totals
  *    Solution: 
- *    - Always use three-step aggregation for hierarchical data:
- *      1. Aggregate details to parent level (all metrics per parent)
- *      2. Segment parents based on characteristics
- *      3. Calculate overall totals if needed
- *    - Common mistakes and fixes:
- *      Instead of:
+ *    - Never segment at detail level when counting or averaging parent entities
+ *    - Always follow this pattern:
+ *      1. Aggregate ALL metrics to parent level first
+ *      2. Then segment based on parent characteristics
+ *      3. Finally add totals if needed
+ *    Common mistakes and fixes:
+ *    Instead of:
+ *      SELECT 
+ *        CASE WHEN d.attribute > 0 THEN 'With' ELSE 'Without' END as segment,
+ *        COUNT(DISTINCT d.parent_id) as total,
+ *        AVG(d.amount) as avg_amount
+ *      FROM details d
+ *      GROUP BY CASE WHEN d.attribute > 0 THEN 'With' ELSE 'Without' END
+ *    Use:
+ *      WITH parent_totals AS (
  *        SELECT 
- *          has_attribute,
- *          COUNT(DISTINCT parent_id) as total,
- *          AVG(amount) as avg_amount
+ *          parent_id,
+ *          SUM(amount) as total_amount,
+ *          MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute
  *        FROM details
- *        GROUP BY has_attribute
- *      Use:
- *        WITH parent_totals AS (
- *          SELECT 
- *            parent_id,
- *            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute,
- *            SUM(amount) as total_amount
- *          FROM details
- *          GROUP BY parent_id
- *        )
- *        SELECT
- *          has_attribute,
- *          COUNT(*) as total,
- *          AVG(total_amount) as avg_amount
- *        FROM parent_totals
- *        GROUP BY has_attribute
+ *        GROUP BY parent_id
+ *      )
+ *      SELECT
+ *        CASE WHEN has_attribute = 1 THEN 'With' ELSE 'Without' END as segment,
+ *        COUNT(*) as total,
+ *        AVG(total_amount) as avg_amount
+ *      FROM parent_totals
+ *      GROUP BY has_attribute
  *    Testing:
- *    - Compare results with manual calculations for a small dataset
- *    - Verify parent counts match between segments and totals
- *    - Check that averages are calculated at the correct level
- *    - Test with parents having varying numbers of detail records
- *    - Test with mixed attribute values within the same parent
+ *    - Compare segment counts: sum should equal total parents
+ *    - Check parent appears in only one segment
+ *    - Verify averages match manual calculations
+ *    - Test with parent having mixed attribute values
+ *    - Test with uneven distribution of details per parent
  * 
  * 8. "Overloaded Error"
  *    Problem: Query too complex or taking too long
