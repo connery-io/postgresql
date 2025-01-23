@@ -238,10 +238,33 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - No code blocks or formatting
 
     3. UNION/Compound Queries:
-      - Place ORDER BY only at the final query level
-      - Ensure consistent column names and types across UNION parts
-      - Add descriptive labels for different result sets
-      - Use CTEs for complex UNION operations
+      - Place ORDER BY only at the final query level, never inside CTEs or UNION parts
+      - Ensure consistent column names and types across all UNION parts
+      - For segmentation with totals:
+        * WRONG: Using ORDER BY inside WITH clause or UNION parts
+        * RIGHT: Single ORDER BY after all UNIONs
+      - For sorting segments with totals:
+        * Use CASE statement in final ORDER BY
+        * Put totals first/last using segment name
+      Example pattern:
+        WITH base_segments AS (
+          SELECT segment, metrics...
+          FROM parent_totals
+          GROUP BY segment
+          
+          UNION ALL
+          
+          SELECT 'Total' as segment, metrics...
+          FROM parent_totals
+        )
+        SELECT *
+        FROM base_segments
+        ORDER BY
+          CASE 
+            WHEN segment = 'Total' THEN 2
+            WHEN segment = 'First Segment' THEN 0
+            ELSE 1
+          END;
 
     4. Aggregation Rules:
       - Never use aggregates in GROUP BY clauses
@@ -414,11 +437,44 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - NO explanations or text, only SQL
  * 
  * 3. "invalid UNION/INTERSECT/EXCEPT ORDER BY clause"
- *    Problem: Incorrect ORDER BY with UNION
+ *    Problem: Attempting to use ORDER BY within UNION parts
  *    Solution: 
- *    - Use result_type column for sorting
- *    - ORDER BY only at final query level
- *    - Consistent column names across UNION
+ *    - Move all ORDER BY clauses outside the UNION
+ *    - Use CASE statement in final ORDER BY for segment ordering
+ *    Example fix:
+ *      Instead of:
+ *        WITH segments AS (
+ *          SELECT ... FROM parent_totals
+ *          GROUP BY segment
+ *          ORDER BY segment  -- Wrong: ORDER BY inside CTE
+ *          
+ *          UNION ALL
+ *          
+ *          SELECT ... FROM parent_totals
+ *          ORDER BY segment  -- Wrong: ORDER BY in UNION part
+ *        )
+ *      Use:
+ *        WITH segments AS (
+ *          SELECT ... FROM parent_totals
+ *          GROUP BY segment
+ *          
+ *          UNION ALL
+ *          
+ *          SELECT ... FROM parent_totals
+ *        )
+ *        SELECT *
+ *        FROM segments
+ *        ORDER BY  -- Correct: Single ORDER BY after UNION
+ *          CASE 
+ *            WHEN segment = 'Total' THEN 2
+ *            WHEN segment = 'First' THEN 0
+ *            ELSE 1
+ *          END;
+ *    Testing:
+ *    - Verify segment order is correct
+ *    - Check that totals appear in desired position
+ *    - Test with different segment names
+ *    - Ensure all UNION parts have matching column counts and types
  * 
  * 4. "aggregate functions are not allowed in GROUP BY"
  *    Problem: Calculated fields in GROUP BY
