@@ -260,36 +260,40 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
 
     7. Multi-level Aggregations:
       - Always use hierarchical aggregation for nested data:
-        * First aggregate at the detail level to parent level
-        * Then aggregate parents to segments
+        * First CTE: Aggregate details to parent level
+        * Second CTE: Segment parents based on characteristics
+        * Final CTE: Calculate overall totals if needed
       - For entity-level averages:
-        * Calculate totals per parent entity first
-        * Then average the parent totals
+        * WRONG: AVG(detail.value)
+        * RIGHT: AVG(parent_totals.total_value)
       - For entity grouping:
-        * Determine entity characteristics at parent level using MAX/MIN
-        * Group by these parent-level attributes
+        * WRONG: GROUP BY detail.attribute > 0
+        * RIGHT: GROUP BY parent_level.has_attribute
       - For MECE (Mutually Exclusive, Collectively Exhaustive) results:
-        * Ensure segments don't overlap by using parent-level flags
-        * Verify segment totals match overall totals
-        * Use parent-level COUNT instead of detail-level COUNT
+        * WRONG: COUNT(DISTINCT parent_id) directly from details
+        * RIGHT: COUNT(*) from parent-level CTE
       Example pattern:
         WITH detail_totals AS (
+          -- First aggregate all details to parent level
           SELECT 
             parent_id,
-            SUM(quantity) as items_total,
+            SUM(quantity) as total_quantity,
             SUM(amount) as total_amount,
-            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute
+            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute,
+            SUM(amount * attribute) as attribute_amount
           FROM detail_table
           GROUP BY parent_id
         ),
         parent_segments AS (
+          -- Then segment based on parent-level characteristics
           SELECT
             CASE WHEN has_attribute = 1 THEN 'With Attribute' 
                  ELSE 'Without Attribute' END as segment,
             COUNT(*) as total_parents,
-            AVG(items_total) as avg_items,
-            SUM(total_amount) as total_value,
-            AVG(total_amount) as avg_value
+            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_quantity,
+            ROUND(CAST(AVG(total_amount) AS NUMERIC), 2) as avg_amount,
+            ROUND(CAST(AVG(attribute_amount) AS NUMERIC), 2) as avg_attr_amount,
+            ROUND(CAST(SUM(attribute_amount) * 100.0 / NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
           FROM detail_totals
           GROUP BY has_attribute
         )
@@ -438,36 +442,41 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Never use window function results directly in GROUP BY
  * 
  * 7. "Non-MECE Results in Multi-Level Aggregations"
- *     Problem: Mixing detail-level and parent-level calculations
- *     Solution: 
- *     - Always use two-step aggregation for hierarchical data:
- *       1. First aggregate details to parent level
- *       2. Then aggregate parents to segments
- *     - For parent entity characteristics:
- *       * Use MAX() or similar to get single value per parent
- *     - For averages:
- *       * Calculate totals per parent first
- *       * Then average the parent totals
- *     Example fix:
- *       Instead of:
- *         SELECT AVG(quantity * amount)
- *         FROM detail_table
- *         GROUP BY has_attribute
- *       Use:
- *         WITH parent_totals AS (
- *           SELECT parent_id,
- *                  SUM(quantity * amount) as parent_value
- *           FROM detail_table
- *           GROUP BY parent_id
- *         )
- *         SELECT AVG(parent_value)
- *         FROM parent_totals
- *     Testing:
- *     - Compare total parent count with distinct parent_ids
- *     - Verify sum of segments equals total
- *     - Check if parent-level metrics match when calculated different ways
- *     - Test with parents having multiple detail records
- *     - Test with parents having mixed attribute values in details
+ *    Problem: Incorrect aggregation levels leading to wrong averages and counts
+ *    Solution: 
+ *    - Always use three-step aggregation for hierarchical data:
+ *      1. Aggregate details to parent level (all metrics per parent)
+ *      2. Segment parents based on characteristics
+ *      3. Calculate overall totals if needed
+ *    - Common mistakes and fixes:
+ *      Instead of:
+ *        SELECT 
+ *          has_attribute,
+ *          COUNT(DISTINCT parent_id) as total,
+ *          AVG(amount) as avg_amount
+ *        FROM details
+ *        GROUP BY has_attribute
+ *      Use:
+ *        WITH parent_totals AS (
+ *          SELECT 
+ *            parent_id,
+ *            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute,
+ *            SUM(amount) as total_amount
+ *          FROM details
+ *          GROUP BY parent_id
+ *        )
+ *        SELECT
+ *          has_attribute,
+ *          COUNT(*) as total,
+ *          AVG(total_amount) as avg_amount
+ *        FROM parent_totals
+ *        GROUP BY has_attribute
+ *    Testing:
+ *    - Compare results with manual calculations for a small dataset
+ *    - Verify parent counts match between segments and totals
+ *    - Check that averages are calculated at the correct level
+ *    - Test with parents having varying numbers of detail records
+ *    - Test with mixed attribute values within the same parent
  * 
  * 8. "Overloaded Error"
  *    Problem: Query too complex or taking too long
