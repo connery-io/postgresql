@@ -222,13 +222,15 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
   const systemPrompt = `You are a PostgreSQL expert. Generate secure, read-only SQL queries based on natural language questions.
         Schema information: ${schemaInfo}
 
+        CRITICAL: All patterns below are EXAMPLES. You must adapt them to use actual table and column names from the provided schema information. Never use example table names in actual queries!
+
         RESPONSE FORMAT:
         - Return ONLY the raw SQL query
         - NO explanations
         - NO markdown
-        - NO comments about what the query does
-        - NO "Here's the query:" or similar prefixes
-        - ONLY the SQL code itself
+        - NO comments
+        - NO prefixes
+        - ONLY SQL code
 
         CRITICAL RULES:
         1. NEVER use window functions inside GROUP BY
@@ -238,54 +240,80 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         5. ALWAYS calculate raw values before aggregating
         6. ALWAYS use explicit CAST for numeric calculations
         7. ALWAYS handle NULL values with NULLIF in divisions
-        8. ALWAYS ensure segments are MECE (Mutually Exclusive, Collectively Exhaustive)
-        9. ALWAYS use EXISTS for checking related records
-        10. ALWAYS limit results using: LIMIT ${maxRows};
+        8. ALWAYS verify table/column existence in schema
+        9. ALWAYS use proper table aliases matching schema
+        10. ALWAYS qualify all column names with table aliases
+        11. ALWAYS use schema-appropriate JOIN conditions
+        12. ALWAYS limit results using: LIMIT ${maxRows}
 
-        CRITICAL PATTERNS:
-        1. Basic Counts with Conditions:
-          WITH metrics AS (
+        PATTERN TEMPLATES (adapt to actual schema):
+        1. Basic Counts with Existence Check:
+          WITH base_counts AS (
             SELECT
-              COUNT(*) as total_count,
-              COUNT(DISTINCT order_id) as unique_orders,
-              SUM(CASE WHEN condition THEN 1 ELSE 0 END) as matching_count
-            FROM source_table
+              t1.id,  -- Replace with actual primary key
+              CASE WHEN EXISTS (
+                SELECT 1 FROM related_table t2
+                WHERE t2.foreign_key = t1.id  -- Replace with actual relationship
+              ) THEN 1 ELSE 0 END as has_related
+            FROM main_table t1  -- Replace with actual table
           )
-          SELECT * FROM metrics;
+          SELECT
+            COUNT(*) as total_count,
+            SUM(has_related) as related_count
+          FROM base_counts;
 
         2. Segmentation with Totals:
           WITH base_data AS (
-            SELECT 
-              CAST(value AS NUMERIC) as value,
-              CAST(discount AS NUMERIC) as discount
-            FROM source_table
+            SELECT
+              t1.id,
+              CAST(t1.value_column AS NUMERIC) as value,  -- Always CAST numeric values
+              CAST(COALESCE(t2.related_value, 0) AS NUMERIC) as related_value
+            FROM main_table t1
+            LEFT JOIN related_table t2 
+              ON t2.foreign_key = t1.id  -- Replace with actual relationship
           ),
-          segment_metrics AS (
+          metrics AS (
             SELECT
               'Segment' as result_type,
-              CASE WHEN condition THEN 'Type A' ELSE 'Type B' END as segment,
+              CASE WHEN condition THEN 'A' ELSE 'B' END as segment,
               COUNT(*) as count,
               AVG(value) as avg_value,
-              SUM(value) as total_value
+              SUM(value) as total_value,
+              ROUND(
+                AVG(CAST(related_value AS NUMERIC) * 100.0 / 
+                    NULLIF(CAST(value AS NUMERIC), 0)
+                ), 2) as percentage
             FROM base_data
-            GROUP BY CASE WHEN condition THEN 'Type A' ELSE 'Type B' END
+            GROUP BY CASE WHEN condition THEN 'A' ELSE 'B' END
           ),
-          total_metrics AS (
+          totals AS (
             SELECT
               'Total' as result_type,
               'Total' as segment,
               COUNT(*) as count,
               AVG(value) as avg_value,
-              SUM(value) as total_value
+              SUM(value) as total_value,
+              ROUND(
+                AVG(CAST(related_value AS NUMERIC) * 100.0 / 
+                    NULLIF(CAST(value AS NUMERIC), 0)
+                ), 2) as percentage
             FROM base_data
           )
-          SELECT * FROM segment_metrics
+          SELECT * FROM metrics
           UNION ALL
-          SELECT * FROM total_metrics
+          SELECT * FROM totals
           ORDER BY result_type DESC, segment;
 
         3. Correlation Analysis:
-          WITH segment_data AS (
+          WITH base_data AS (
+            SELECT
+              t1.id,
+              CAST(t1.value_column AS NUMERIC) as x,
+              CAST(COALESCE(t2.related_value, 0) AS NUMERIC) as y
+            FROM main_table t1
+            LEFT JOIN related_table t2 ON t2.foreign_key = t1.id
+          ),
+          segment_data AS (
             SELECT
               segment,
               AVG(x) as avg_x,
@@ -298,54 +326,46 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
               SUM(y) as sum_y
             FROM (
               SELECT
-                segment,
-                CAST(value AS NUMERIC) as x,
-                CAST(discount AS NUMERIC) as y
-              FROM base_table
+                CASE WHEN condition THEN 'A' ELSE 'B' END as segment,
+                x, y
+              FROM base_data
             ) t
             GROUP BY segment
           )
           SELECT
             segment,
-            (n * sum_xy - sum_x * sum_y) / 
-            (SQRT(n * SUM(x * x) - SUM(x) * SUM(x)) * 
-             SQRT(n * SUM(y * y) - SUM(y) * SUM(y))) as correlation
+            ROUND(
+              (n * sum_xy - sum_x * sum_y) / 
+              NULLIF(
+                (SQRT(NULLIF(n * SUM(x * x) - SUM(x) * SUM(x), 0)) * 
+                 SQRT(NULLIF(n * SUM(y * y) - SUM(y) * SUM(y), 0))),
+                0
+              ),
+              4
+            ) as correlation
           FROM segment_data
           GROUP BY segment;
 
         4. Percentile-based Segmentation:
           WITH base_data AS (
             SELECT 
-              *,
-              NTILE(10) OVER (ORDER BY CAST(value AS NUMERIC)) as segment
-            FROM source_table
+              t1.*,
+              CAST(t1.value_column AS NUMERIC) as numeric_value,
+              NTILE(10) OVER (ORDER BY CAST(t1.value_column AS NUMERIC)) as segment
+            FROM main_table t1
           ),
           segment_metrics AS (
             SELECT 
               segment,
               COUNT(*) as count,
-              AVG(CAST(value AS NUMERIC)) as avg_value
+              AVG(numeric_value) as avg_value,
+              MIN(numeric_value) as min_value,
+              MAX(numeric_value) as max_value
             FROM base_data
             GROUP BY segment
           )
           SELECT * FROM segment_metrics
-          ORDER BY segment;
-
-        5. Existence Checks:
-          WITH order_metrics AS (
-            SELECT
-              o.order_id,
-              EXISTS (
-                SELECT 1 
-                FROM order_discounts od 
-                WHERE od.order_id = o.order_id
-              ) as has_discount
-            FROM orders o
-          )
-          SELECT
-            COUNT(*) as total_orders,
-            SUM(CASE WHEN has_discount THEN 1 ELSE 0 END) as orders_with_discount
-          FROM order_metrics;`;
+          ORDER BY segment;`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
@@ -407,3 +427,77 @@ function formatDataResponse(rows: any[], instructions?: string): string {
 function formatQueryResponse(sqlQuery: string): string {
   return sqlQuery;
 }
+
+/*
+ * CRITICAL NOTE: All patterns must be schema-agnostic and generalizable!
+ * The examples use generic table/column names that must be replaced
+ * with actual schema elements from the provided schema information.
+ * 
+ * ERROR HISTORY AND SOLUTIONS LOG
+ * ------------------------------
+ * This section tracks common errors and their solutions to ensure
+ * we maintain compatibility across all use cases.
+ * 
+ * 1. "missing FROM-clause entry for table"
+ *    Problem: Incorrect table references or missing schema validation
+ *    Solution: 
+ *    - Verify all tables exist in schema before using
+ *    - Use proper table aliases consistently
+ *    - Ensure JOINs match actual schema relationships
+ *    - Check foreign key constraints in schema
+ * 
+ * 2. "syntax error at or near 'I'"
+ *    Problem: Model including explanatory text in SQL output
+ *    Solution: 
+ *    - Strict response format rules
+ *    - NO explanations or text, only SQL
+ * 
+ * 3. "invalid UNION/INTERSECT/EXCEPT ORDER BY clause"
+ *    Problem: Incorrect ORDER BY with UNION
+ *    Solution: 
+ *    - Use result_type column for sorting
+ *    - ORDER BY only at final query level
+ *    - Consistent column names across UNION
+ * 
+ * 4. "aggregate functions are not allowed in GROUP BY"
+ *    Problem: Calculated fields in GROUP BY
+ *    Solution: 
+ *    - Pre-calculate values in earlier CTEs
+ *    - Group only by raw columns or simple CASE statements
+ *    - No aggregates in GROUP BY clause
+ * 
+ * 5. "aggregate function calls cannot contain window function calls"
+ *    Problem: Mixing window functions with aggregates
+ *    Solution: 
+ *    - Calculate window functions in separate CTE
+ *    - Use results in subsequent aggregations
+ *    - Keep window functions and aggregates separate
+ * 
+ * 6. "window functions are not allowed in GROUP BY"
+ *    Problem: Window functions in GROUP BY clause
+ *    Solution: 
+ *    - Calculate window functions first in CTE
+ *    - Group by resulting segment/value
+ *    - Never use window function results directly in GROUP BY
+ * 
+ * IMPLEMENTATION REQUIREMENTS:
+ * 1. Schema Awareness
+ *    - All queries must be built using actual schema information
+ *    - Verify table and column existence before use
+ *    - Use proper relationships from schema constraints
+ * 
+ * 2. Safe Calculations
+ *    - Always CAST numeric values explicitly
+ *    - Use NULLIF for division operations
+ *    - Handle NULL values appropriately
+ * 
+ * 3. Query Structure
+ *    - Use CTEs for complex calculations
+ *    - Separate window functions from aggregations
+ *    - Proper table aliases and column qualification
+ * 
+ * 4. Performance
+ *    - Limit results appropriately
+ *    - Use indexes when available (usually primary keys)
+ *    - Filter early in the query chain
+ */
