@@ -336,6 +336,44 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - For ratios/divisions: ROUND(CAST(CAST(numerator AS NUMERIC) / NULLIF(denominator, 0) AS NUMERIC), 2)
       - Handle NULLs: COALESCE(value, 0)
 
+    10. Statistical Calculations:
+       - For complex statistics requiring multiple aggregations:
+         * WRONG: Mixing window and aggregate functions directly
+         * RIGHT: Use staged CTEs to build up calculations
+       - For correlations and statistical measures:
+         * Step 1: Calculate base metrics per entity
+         * Step 2: Calculate statistical components
+         * Step 3: Combine into final formula
+       Example pattern for correlation:
+         WITH base_metrics AS (
+           -- First get metrics per entity
+           SELECT 
+             parent_id,
+             SUM(amount) / COUNT(*) as avg_amount,
+             SUM(attribute) / COUNT(*) as avg_attribute
+           FROM details
+           GROUP BY parent_id
+         ),
+         stats AS (
+           -- Then calculate statistical components
+           SELECT
+             COUNT(*) as n,
+             AVG(avg_amount) as avg_x,
+             AVG(avg_attribute) as avg_y,
+             STDDEV_POP(avg_amount) as stddev_x,
+             STDDEV_POP(avg_attribute) as stddev_y,
+             SUM((avg_amount * avg_attribute)) as sum_xy,
+             SUM(avg_amount) as sum_x,
+             SUM(avg_attribute) as sum_y
+           FROM base_metrics
+         )
+         -- Finally combine into correlation formula
+         SELECT 
+           (n * sum_xy - sum_x * sum_y) /
+           (SQRT(n * SUM(POWER(avg_amount, 2)) - POWER(sum_x, 2)) *
+            SQRT(n * SUM(POWER(avg_attribute, 2)) - POWER(sum_y, 2))) as correlation
+         FROM stats, base_metrics;
+
     IMPLEMENTATION REQUIREMENTS:
     - Generate only SELECT queries (no modifications)
     - Include LIMIT ${maxRows} in final results
@@ -486,11 +524,32 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - No aggregates in GROUP BY clause
  * 
  * 5. "aggregate function calls cannot contain window function calls"
- *    Problem: Mixing window functions with aggregates
+ *    Problem: Attempting to combine window functions with aggregates
  *    Solution: 
- *    - Calculate window functions in separate CTE
+ *    - Break calculation into separate CTEs
+ *    - Calculate window functions first
  *    - Use results in subsequent aggregations
- *    - Keep window functions and aggregates separate
+ *    Example fix:
+ *      Instead of:
+ *        SELECT CORR(AVG(amount) OVER (PARTITION BY parent_id), 
+ *                   AVG(attribute) OVER (PARTITION BY parent_id))
+ *        FROM details
+ *      Use:
+ *        WITH per_parent AS (
+ *          SELECT parent_id,
+ *                 AVG(amount) as avg_amount,
+ *                 AVG(attribute) as avg_attribute
+ *          FROM details
+ *          GROUP BY parent_id
+ *        )
+ *        SELECT CORR(avg_amount, avg_attribute)
+ *        FROM per_parent
+ *    Testing:
+ *    - Verify results match manual calculations
+ *    - Test with different window sizes
+ *    - Check handling of NULL values
+ *    - Test with single-row groups
+ *    - Validate statistical significance
  * 
  * 6. "window functions are not allowed in GROUP BY"
  *    Problem: Window functions in GROUP BY clause
@@ -632,6 +691,44 @@ function formatQueryResponse(sqlQuery: string): string {
  *     - Verify no parent appears in multiple segments
  *     - Test with parents having mixed attribute values
  *     - Check that parent-level metrics match when calculated different ways
+ * 
+ * 14. "Statistical Calculations:
+ *     - For complex statistics requiring multiple aggregations:
+ *       * WRONG: Mixing window and aggregate functions directly
+ *       * RIGHT: Use staged CTEs to build up calculations
+ *     - For correlations and statistical measures:
+ *       * Step 1: Calculate base metrics per entity
+ *       * Step 2: Calculate statistical components
+ *       * Step 3: Combine into final formula
+ *     Example pattern for correlation:
+ *       WITH base_metrics AS (
+ *         -- First get metrics per parent
+ *         SELECT 
+ *           parent_id,
+ *           SUM(amount) / COUNT(*) as avg_amount,
+ *           SUM(attribute) / COUNT(*) as avg_attribute
+ *         FROM details
+ *         GROUP BY parent_id
+ *       ),
+ *       stats AS (
+ *         -- Then calculate statistical components
+ *         SELECT
+ *           COUNT(*) as n,
+ *           AVG(avg_amount) as avg_x,
+ *           AVG(avg_attribute) as avg_y,
+ *           STDDEV_POP(avg_amount) as stddev_x,
+ *           STDDEV_POP(avg_attribute) as stddev_y,
+ *           SUM((avg_amount * avg_attribute)) as sum_xy,
+ *           SUM(avg_amount) as sum_x,
+ *           SUM(avg_attribute) as sum_y
+ *         FROM base_metrics
+ *       )
+ *       -- Finally combine into correlation formula
+ *       SELECT 
+ *         (n * sum_xy - sum_x * sum_y) /
+ *         (SQRT(n * SUM(POWER(avg_amount, 2)) - POWER(sum_x, 2)) *
+ *          SQRT(n * SUM(POWER(avg_attribute, 2)) - POWER(sum_y, 2))) as correlation
+ *       FROM stats, base_metrics;
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
