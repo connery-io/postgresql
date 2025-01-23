@@ -344,43 +344,47 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
          * Step 1: Calculate base metrics per entity with unique names
          * Step 2: Calculate statistical components with qualified references
          * Step 3: Combine into final formula
-       - For column references:
-         * WRONG: Using ambiguous column names across CTEs
-         * RIGHT: Using unique or qualified column names
-         * RIGHT: Using table aliases for clarity
-       Example pattern for correlation:
+       - For grouped statistics:
+         * WRONG: Using non-aggregated columns from stats
+         * RIGHT: Include all grouping columns in each CTE
+       Example pattern for grouped correlation:
          WITH base_metrics AS (
            -- First get metrics per entity with unique names
            SELECT 
              parent_id,
+             segment_id,  -- Include grouping columns
              SUM(amount) / NULLIF(COUNT(*), 0) as entity_avg_amount,
              SUM(attribute) / NULLIF(COUNT(*), 0) as entity_avg_attribute
            FROM details
-           GROUP BY parent_id
+           GROUP BY parent_id, segment_id
          ),
-         stats AS (
-           -- Then calculate statistical components with unique names
+         stats_per_segment AS (
+           -- Calculate components per segment
            SELECT
-             COUNT(*) as n,
-             AVG(entity_avg_amount) as population_avg_x,
-             AVG(entity_avg_attribute) as population_avg_y,
-             STDDEV_POP(entity_avg_amount) as population_stddev_x,
-             STDDEV_POP(entity_avg_attribute) as population_stddev_y,
-             SUM(entity_avg_amount * entity_avg_attribute) as sum_xy,
-             SUM(entity_avg_amount) as sum_x,
-             SUM(entity_avg_attribute) as sum_y
+             segment_id,  -- Include grouping columns
+             COUNT(*) as segment_n,
+             AVG(entity_avg_amount) as segment_avg_x,
+             AVG(entity_avg_attribute) as segment_avg_y,
+             STDDEV_POP(entity_avg_amount) as segment_stddev_x,
+             STDDEV_POP(entity_avg_attribute) as segment_stddev_y,
+             SUM(entity_avg_amount * entity_avg_attribute) as segment_sum_xy,
+             SUM(entity_avg_amount) as segment_sum_x,
+             SUM(entity_avg_attribute) as segment_sum_y,
+             SUM(POWER(entity_avg_amount, 2)) as segment_sum_x2,
+             SUM(POWER(entity_avg_attribute, 2)) as segment_sum_y2
            FROM base_metrics
+           GROUP BY segment_id
          )
-         -- Finally combine into correlation formula with qualified references
+         -- Calculate correlation per segment
          SELECT 
-           (stats.n * stats.sum_xy - stats.sum_x * stats.sum_y) /
+           segment_id,
+           (segment_n * segment_sum_xy - segment_sum_x * segment_sum_y) /
            NULLIF(
-             (SQRT(stats.n * SUM(POWER(bm.entity_avg_amount, 2)) - POWER(stats.sum_x, 2)) *
-              SQRT(stats.n * SUM(POWER(bm.entity_avg_attribute, 2)) - POWER(stats.sum_y, 2))),
+             (SQRT(segment_n * segment_sum_x2 - POWER(segment_sum_x, 2)) *
+              SQRT(segment_n * segment_sum_y2 - POWER(segment_sum_y, 2))),
              0
-           ) as correlation_coefficient
-         FROM stats
-         CROSS JOIN base_metrics bm;
+           ) as segment_correlation
+         FROM stats_per_segment;
 
     IMPLEMENTATION REQUIREMENTS:
     - Generate only SELECT queries (no modifications)
@@ -766,4 +770,47 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Limit results appropriately
  *    - Use indexes when available (usually primary keys)
  *    - Filter early in the query chain
+ * 
+ * 16. "column must appear in the GROUP BY clause or be used in an aggregate function"
+ *     Problem: Using non-aggregated columns in grouped statistical calculations
+ *     Solution: 
+ *     - Pre-calculate all statistical components within groups
+ *     - Carry grouping columns through all CTEs
+ *     - Use only aggregated values in final calculations
+ *     Example fix:
+ *       Instead of:
+ *         WITH stats AS (
+ *           SELECT 
+ *             segment,
+ *             COUNT(*) as n,
+ *             SUM(x*y) as sum_xy
+ *           FROM data
+ *           GROUP BY segment
+ *         )
+ *         SELECT 
+ *           segment,
+ *           (n * sum_xy - ...) / ...  -- Error: n not grouped
+ *         FROM stats
+ *       Use:
+ *         WITH stats AS (
+ *           SELECT 
+ *             segment,
+ *             COUNT(*) as segment_n,
+ *             SUM(x*y) as segment_sum_xy,
+ *             SUM(POWER(x, 2)) as segment_sum_x2
+ *           FROM data
+ *           GROUP BY segment
+ *         )
+ *         SELECT 
+ *           segment,
+ *           (segment_n * segment_sum_xy) / 
+ *             SQRT(segment_n * segment_sum_x2)
+ *         FROM stats
+ *     Testing:
+ *     - Verify all columns used in calculations are either:
+ *       * Part of GROUP BY
+ *       * Aggregated within group
+ *     - Test with multiple grouping columns
+ *     - Validate results match per-group manual calculations
+ *     - Check edge cases with single-row groups
  */
