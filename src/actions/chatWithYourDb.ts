@@ -295,42 +295,33 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - For total averages:
         * WRONG: AVG of segment averages
         * RIGHT: SUM of all values / COUNT of all parents
-      Example pattern for segmented averages:
-        WITH parent_totals AS (
-          -- First aggregate ALL metrics to parent level
-          SELECT 
-            parent_id,
-            SUM(amount) as total_amount
-          FROM details
-          GROUP BY parent_id
-        ),
-        segments AS (
-          -- Then segment using NTILE or other method
-          SELECT 
-            parent_id,
-            total_amount,
-            NTILE(10) OVER (ORDER BY total_amount) as segment
-          FROM parent_totals
-        ),
-        segment_metrics AS (
-          -- Calculate segment metrics using SUM and COUNT
-          SELECT
-            'Segment ' || segment as segment_name,
-            COUNT(*) as parent_count,
-            SUM(total_amount) as segment_total,
-            SUM(total_amount) / COUNT(*) as segment_average
-          FROM segments
-          GROUP BY segment
-          
-          UNION ALL
-          
-          SELECT 
-            'Total' as segment_name,
-            COUNT(*) as parent_count,
-            SUM(total_amount) as total_amount,
-            SUM(total_amount) / COUNT(*) as overall_average
-          FROM parent_totals
-        )
+      - For consistent segmentation:
+        * Step 1: Determine parent-level attributes
+          WITH parent_attrs AS (
+            SELECT parent_id, 
+                   MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attr
+            FROM details
+            GROUP BY parent_id
+          )
+        * Step 2: Calculate parent-level totals
+          parent_totals AS (
+            SELECT p.parent_id, 
+                   p.has_attr,
+                   SUM(d.amount) as total_amount
+            FROM parent_attrs p
+            JOIN details d ON d.parent_id = p.parent_id
+            GROUP BY p.parent_id, p.has_attr
+          )
+        * Step 3: Create segments
+          segments AS (
+            SELECT
+              CASE WHEN has_attr = 1 THEN 'With' ELSE 'Without' END as segment,
+              COUNT(*) as parent_count,
+              SUM(total_amount) as segment_total,
+              SUM(total_amount) / COUNT(*) as segment_average
+            FROM parent_totals
+            GROUP BY has_attr
+          )
 
     8. Query Optimization:
       - Keep queries as simple as possible while meeting requirements
@@ -600,6 +591,47 @@ function formatQueryResponse(sqlQuery: string): string {
  *     - Test with skewed value distributions
  *     - Verify segment counts sum to total
  *     - Check for proper handling of outliers
+ * 
+ * 13. "Inconsistent Segmentation Results"
+ *     Problem: Same query produces different segment results
+ *     Solution: 
+ *     - Use strict three-step segmentation pattern:
+ *       1. Determine parent-level attributes first (separate CTE)
+ *       2. Calculate parent-level totals using these attributes
+ *       3. Segment using the parent-level attributes
+ *     - Never mix segmentation and aggregation in same step
+ *     Example fix:
+ *       Instead of:
+ *         SELECT 
+ *           CASE WHEN d.attribute > 0 THEN 'With' ELSE 'Without' END,
+ *           COUNT(DISTINCT d.parent_id),
+ *           SUM(d.amount)
+ *         FROM details d
+ *         GROUP BY CASE WHEN d.attribute > 0 THEN 'With' ELSE 'Without' END
+ *       Use:
+ *         WITH parent_attrs AS (
+ *           SELECT parent_id, MAX(attribute > 0) as has_attr
+ *           FROM details
+ *           GROUP BY parent_id
+ *         ),
+ *         parent_totals AS (
+ *           SELECT p.parent_id, p.has_attr, SUM(d.amount) as total
+ *           FROM parent_attrs p
+ *           JOIN details d ON d.parent_id = p.parent_id
+ *           GROUP BY p.parent_id, p.has_attr
+ *         )
+ *         SELECT 
+ *           CASE WHEN has_attr THEN 'With' ELSE 'Without' END,
+ *           COUNT(*),
+ *           SUM(total)
+ *         FROM parent_totals
+ *         GROUP BY has_attr
+ *     Testing:
+ *     - Run query multiple times to verify consistent results
+ *     - Compare segment counts with direct parent counts
+ *     - Verify no parent appears in multiple segments
+ *     - Test with parents having mixed attribute values
+ *     - Check that parent-level metrics match when calculated different ways
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
