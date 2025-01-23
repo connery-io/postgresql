@@ -245,6 +245,12 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
         10. ALWAYS qualify all column names with table aliases
         11. ALWAYS use schema-appropriate JOIN conditions
         12. ALWAYS limit results using: LIMIT ${maxRows}
+        13. ALWAYS ensure MECE (Mutually Exclusive, Collectively Exhaustive) results:
+            - Aggregate at the correct level (order vs line item)
+            - Pre-aggregate line items to order level first
+            - Verify totals match expected counts
+            - Use appropriate DISTINCT counts
+            - Document aggregation level in comments
 
         PATTERN TEMPLATES (adapt to actual schema):
         1. Basic Counts with Existence Check:
@@ -365,7 +371,57 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             GROUP BY segment
           )
           SELECT * FROM segment_metrics
-          ORDER BY segment;`;
+          ORDER BY segment;
+
+        5. Order-Level Analysis with Line Items:
+          WITH order_totals AS (
+            SELECT
+              o.order_id,
+              COUNT(*) as line_items,
+              SUM(CAST(od.quantity AS NUMERIC)) as total_quantity,
+              SUM(CAST(od.unit_price * od.quantity AS NUMERIC)) as total_value,
+              SUM(CAST(od.unit_price * od.quantity * od.discount AS NUMERIC)) as total_discount,
+              MAX(CASE WHEN od.discount > 0 THEN 1 ELSE 0 END) as has_discount
+            FROM orders o
+            JOIN order_details od ON od.order_id = o.order_id
+            GROUP BY o.order_id
+          ),
+          segments AS (
+            SELECT
+              'Segment' as result_type,
+              CASE WHEN has_discount = 1 THEN 'With Discount' 
+                   ELSE 'No Discount' END as segment,
+              COUNT(*) as order_count,
+              AVG(total_quantity) as avg_order_size,
+              AVG(total_value) as avg_order_value,
+              AVG(total_discount) as avg_discount_value,
+              ROUND(
+                SUM(total_discount) * 100.0 / 
+                NULLIF(SUM(total_value), 0),
+                2
+              ) as discount_percentage
+            FROM order_totals
+            GROUP BY has_discount
+          ),
+          totals AS (
+            SELECT
+              'Total' as result_type,
+              'All Orders' as segment,
+              COUNT(*) as order_count,
+              AVG(total_quantity) as avg_order_size,
+              AVG(total_value) as avg_order_value,
+              AVG(total_discount) as avg_discount_value,
+              ROUND(
+                SUM(total_discount) * 100.0 / 
+                NULLIF(SUM(total_value), 0),
+                2
+              ) as discount_percentage
+            FROM order_totals
+          )
+          SELECT * FROM segments
+          UNION ALL
+          SELECT * FROM totals
+          ORDER BY result_type DESC, segment;`;
 
   const ai = new Anthropic({ apiKey });
   const completion = await ai.messages.create({
@@ -479,6 +535,30 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Calculate window functions first in CTE
  *    - Group by resulting segment/value
  *    - Never use window function results directly in GROUP BY
+ * 
+ * 7. "Non-MECE Results in Aggregations"
+ *    Problem: Mixing order-level and line-item-level calculations
+ *    Solution: 
+ *    - Always aggregate at the correct level first
+ *    - For order-level metrics:
+ *      * First aggregate line items per order
+ *      * Then aggregate across orders
+ *    - Use appropriate DISTINCT counts
+ *    - Verify totals match expected counts
+ *    Example fix:
+ *      Instead of:
+ *        SELECT COUNT(DISTINCT order_id) FROM order_details
+ *      Use:
+ *        WITH order_metrics AS (
+ *          SELECT 
+ *            order_id,
+ *            SUM(quantity) as total_quantity,
+ *            SUM(unit_price * quantity) as total_value,
+ *            MAX(CASE WHEN discount > 0 THEN 1 ELSE 0 END) as has_discount
+ *          FROM order_details
+ *          GROUP BY order_id
+ *        )
+ *        SELECT COUNT(*) FROM order_metrics
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
