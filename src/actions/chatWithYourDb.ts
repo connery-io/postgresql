@@ -270,6 +270,13 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - Filter early in CTEs
       - Use indexes (typically primary keys) when available
 
+    9. Numeric Calculations:
+      - Always CAST numeric inputs before ROUND: ROUND(CAST(value AS NUMERIC), 2)
+      - For percentages: ROUND(CAST(value * 100.0 AS NUMERIC), 2)
+      - For monetary values: ROUND(CAST(value AS NUMERIC), 2)
+      - For ratios/divisions: ROUND(CAST(CAST(numerator AS NUMERIC) / NULLIF(denominator, 0) AS NUMERIC), 2)
+      - Handle NULLs: COALESCE(value, 0)
+
     IMPLEMENTATION REQUIREMENTS:
     - Generate only SELECT queries (no modifications)
     - Include LIMIT ${maxRows} in final results
@@ -431,6 +438,25 @@ function formatQueryResponse(sqlQuery: string): string {
  *    - Add timeout handling
  *    - Include simple aggregation pattern
  *    - Avoid unnecessary JOINs for simple calculations
+ * 
+ * 9. "function round(double precision, integer) does not exist"
+ *    Problem: PostgreSQL type mismatch with ROUND function
+ *    Solution: 
+ *    - Always CAST to NUMERIC before ROUND
+ *    - Use proper numeric calculation patterns:
+ *      * Percentages: ROUND(CAST(value * 100.0 AS NUMERIC), 2)
+ *      * Money: ROUND(CAST(value AS NUMERIC), 2)
+ *      * Ratios: ROUND(CAST(CAST(num AS NUMERIC) / NULLIF(denom, 0) AS NUMERIC), 2)
+ *    Example fix:
+ *      Instead of:
+ *        ROUND(price * quantity, 2)
+ *      Use:
+ *        ROUND(CAST(price * quantity AS NUMERIC), 2)
+ *    Testing:
+ *      - Test with decimal values
+ *      - Test with integer values
+ *      - Test with NULL values
+ *      - Test with zero denominators in divisions
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
