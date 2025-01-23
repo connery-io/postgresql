@@ -373,50 +373,55 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           SELECT * FROM segment_metrics
           ORDER BY segment;
 
-        5. Order-Level Analysis with Line Items:
-          WITH order_totals AS (
+        5. Multi-Level Aggregation Pattern:
+          WITH base_aggregates AS (
             SELECT
-              o.order_id,
-              COUNT(*) as line_items,
-              SUM(CAST(od.quantity AS NUMERIC)) as total_quantity,
-              SUM(CAST(od.unit_price * od.quantity AS NUMERIC)) as total_value,
-              SUM(CAST(od.unit_price * od.quantity * od.discount AS NUMERIC)) as total_discount,
-              MAX(CASE WHEN od.discount > 0 THEN 1 ELSE 0 END) as has_discount
-            FROM orders o
-            JOIN order_details od ON od.order_id = o.order_id
-            GROUP BY o.order_id
+              t1.primary_key,  -- Replace with actual PK
+              COUNT(*) as detail_count,
+              SUM(CAST(t2.numeric_field1 AS NUMERIC)) as sum_field1,
+              SUM(CAST(t2.numeric_field2 AS NUMERIC)) as sum_field2,
+              CASE WHEN MAX(t2.condition_field) > 0 THEN 1 ELSE 0 END as has_condition
+            FROM parent_table t1  -- Replace with actual tables
+            JOIN child_table t2 ON t2.foreign_key = t1.primary_key
+            GROUP BY t1.primary_key
           ),
           segments AS (
             SELECT
               'Segment' as result_type,
-              CASE WHEN has_discount = 1 THEN 'With Discount' 
-                   ELSE 'No Discount' END as segment,
-              COUNT(*) as order_count,
-              AVG(total_quantity) as avg_order_size,
-              AVG(total_value) as avg_order_value,
-              AVG(total_discount) as avg_discount_value,
+              CASE 
+                WHEN has_condition = 1 THEN 'Condition Met' 
+                ELSE 'Condition Not Met' 
+              END as segment,
+              COUNT(*) as record_count,
+              ROUND(AVG(detail_count), 2) as avg_details,
+              ROUND(AVG(sum_field1), 2) as avg_sum1,
+              ROUND(AVG(sum_field2), 2) as avg_sum2,
               ROUND(
-                SUM(total_discount) * 100.0 / 
-                NULLIF(SUM(total_value), 0),
+                SUM(sum_field2) * 100.0 / 
+                NULLIF(SUM(sum_field1), 0),
                 2
-              ) as discount_percentage
-            FROM order_totals
-            GROUP BY has_discount
+              ) as calculated_percentage
+            FROM base_aggregates
+            GROUP BY 
+              CASE 
+                WHEN has_condition = 1 THEN 'Condition Met' 
+                ELSE 'Condition Not Met' 
+              END
           ),
           totals AS (
             SELECT
               'Total' as result_type,
-              'All Orders' as segment,
-              COUNT(*) as order_count,
-              AVG(total_quantity) as avg_order_size,
-              AVG(total_value) as avg_order_value,
-              AVG(total_discount) as avg_discount_value,
+              'All Records' as segment,
+              COUNT(*) as record_count,
+              ROUND(AVG(detail_count), 2) as avg_details,
+              ROUND(AVG(sum_field1), 2) as avg_sum1,
+              ROUND(AVG(sum_field2), 2) as avg_sum2,
               ROUND(
-                SUM(total_discount) * 100.0 / 
-                NULLIF(SUM(total_value), 0),
+                SUM(sum_field2) * 100.0 / 
+                NULLIF(SUM(sum_field1), 0),
                 2
-              ) as discount_percentage
-            FROM order_totals
+              ) as calculated_percentage
+            FROM base_aggregates
           )
           SELECT * FROM segments
           UNION ALL
