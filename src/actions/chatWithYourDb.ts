@@ -289,48 +289,46 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
       - For entity-level averages:
         * WRONG: AVG(detail.value) directly from details
         * RIGHT: AVG(parent_totals.total_value) from parent-level CTE
-      - For entity grouping:
-        * WRONG: GROUP BY detail.attribute > 0
-        * RIGHT: GROUP BY parent_level.has_attribute
-      - For MECE (Mutually Exclusive, Collectively Exhaustive) results:
-        * WRONG: Segmenting at detail level then counting parents
-        * RIGHT: First aggregate to parent level, then segment
-      Example pattern for segmentation:
+      - For segment averages:
+        * WRONG: AVG(value) - can be skewed by outliers
+        * RIGHT: SUM(value) / COUNT(*) - maintains arithmetic mean
+      - For total averages:
+        * WRONG: AVG of segment averages
+        * RIGHT: SUM of all values / COUNT of all parents
+      Example pattern for segmented averages:
         WITH parent_totals AS (
           -- First aggregate ALL metrics to parent level
           SELECT 
             parent_id,
-            SUM(quantity) as total_quantity,
-            SUM(amount) as total_amount,
-            SUM(amount * attribute) as attribute_amount,
-            MAX(CASE WHEN attribute > 0 THEN 1 ELSE 0 END) as has_attribute
-          FROM detail_table
+            SUM(amount) as total_amount
+          FROM details
           GROUP BY parent_id
         ),
         segments AS (
-          -- Then segment based on parent-level characteristics
-          SELECT
-            CASE WHEN has_attribute = 1 THEN 'With Attribute' 
-                 ELSE 'Without Attribute' END as segment,
-            COUNT(*) as total_parents,
-            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_items,
-            ROUND(CAST(SUM(total_amount) AS NUMERIC), 2) as total_value,
-            ROUND(CAST(SUM(attribute_amount) AS NUMERIC), 2) as attr_value,
-            ROUND(CAST(SUM(attribute_amount) * 100.0 / 
-                  NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
+          -- Then segment using NTILE or other method
+          SELECT 
+            parent_id,
+            total_amount,
+            NTILE(10) OVER (ORDER BY total_amount) as segment
           FROM parent_totals
-          GROUP BY has_attribute
+        ),
+        segment_metrics AS (
+          -- Calculate segment metrics using SUM and COUNT
+          SELECT
+            'Segment ' || segment as segment_name,
+            COUNT(*) as parent_count,
+            SUM(total_amount) as segment_total,
+            SUM(total_amount) / COUNT(*) as segment_average
+          FROM segments
+          GROUP BY segment
           
           UNION ALL
           
           SELECT 
-            'Total' as segment,
-            COUNT(*) as total_parents,
-            ROUND(CAST(AVG(total_quantity) AS NUMERIC), 2) as avg_items,
-            ROUND(CAST(SUM(total_amount) AS NUMERIC), 2) as total_value,
-            ROUND(CAST(SUM(attribute_amount) AS NUMERIC), 2) as attr_value,
-            ROUND(CAST(SUM(attribute_amount) * 100.0 / 
-                  NULLIF(SUM(total_amount), 0) AS NUMERIC), 2) as attr_percentage
+            'Total' as segment_name,
+            COUNT(*) as parent_count,
+            SUM(total_amount) as total_amount,
+            SUM(total_amount) / COUNT(*) as overall_average
           FROM parent_totals
         )
 
@@ -574,6 +572,34 @@ function formatQueryResponse(sqlQuery: string): string {
  *      - Test with integer values
  *      - Test with NULL values
  *      - Test with zero denominators in divisions
+ * 
+ * 12. "Incorrect Segment Averages"
+ *     Problem: Segment averages don't roll up to total average
+ *     Solution: 
+ *     - Use SUM/COUNT instead of AVG for consistent arithmetic means
+ *     - Calculate totals from base data, not segment averages
+ *     - Verify calculations with these tests:
+ *       * SUM(segment_count × segment_average) should equal total_sum
+ *       * Overall average = total_sum / total_count
+ *     Example fix:
+ *       Instead of:
+ *         SELECT 
+ *           segment,
+ *           AVG(value) as avg_value  -- Wrong: can be skewed
+ *         FROM segments
+ *         GROUP BY segment
+ *       Use:
+ *         SELECT
+ *           segment,
+ *           SUM(value) / COUNT(*) as avg_value  -- Right: arithmetic mean
+ *         FROM segments
+ *         GROUP BY segment
+ *     Testing:
+ *     - Calculate weighted average of segments (count × average)
+ *     - Compare to total sum / total count
+ *     - Test with skewed value distributions
+ *     - Verify segment counts sum to total
+ *     - Check for proper handling of outliers
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
