@@ -251,9 +251,22 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             - Verify totals match expected counts
             - Use appropriate DISTINCT counts
             - Document aggregation level in comments
+        14. ALWAYS use simple queries when possible
+        15. AVOID JOINs unless necessary
+        16. USE indexes (primary keys) when available
 
         PATTERN TEMPLATES (adapt to actual schema):
-        1. Basic Counts with Existence Check:
+        1. Simple Aggregation Pattern:
+          SELECT
+            COUNT(*) as record_count,
+            ROUND(
+              SUM(CAST(numeric_field AS NUMERIC)), 
+              2
+            ) as total_value
+          FROM main_table
+          WHERE condition;  -- Optional
+
+        2. Basic Counts with Existence Check:
           WITH base_counts AS (
             SELECT
               t1.id,  -- Replace with actual primary key
@@ -268,7 +281,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
             SUM(has_related) as related_count
           FROM base_counts;
 
-        2. Segmentation with Totals:
+        3. Segmentation with Totals:
           WITH base_data AS (
             SELECT
               t1.id,
@@ -310,7 +323,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           SELECT * FROM totals
           ORDER BY result_type DESC, segment;
 
-        3. Correlation Analysis:
+        4. Correlation Analysis:
           WITH base_data AS (
             SELECT
               t1.id,
@@ -352,7 +365,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           FROM segment_data
           GROUP BY segment;
 
-        4. Percentile-based Segmentation:
+        5. Percentile-based Segmentation:
           WITH base_data AS (
             SELECT 
               t1.*,
@@ -373,7 +386,7 @@ async function generateSqlQuery(apiKey: string, schemaInfo: string, question: st
           SELECT * FROM segment_metrics
           ORDER BY segment;
 
-        5. Multi-Level Aggregation Pattern:
+        6. Multi-Level Aggregation Pattern:
           WITH base_aggregates AS (
             SELECT
               t1.primary_key,  -- Replace with actual PK
@@ -564,6 +577,14 @@ function formatQueryResponse(sqlQuery: string): string {
  *          GROUP BY order_id
  *        )
  *        SELECT COUNT(*) FROM order_metrics
+ * 
+ * 8. "Overloaded Error"
+ *    Problem: Query too complex or taking too long
+ *    Solution: 
+ *    - Use simpler queries for basic aggregations
+ *    - Add timeout handling
+ *    - Include simple aggregation pattern
+ *    - Avoid unnecessary JOINs for simple calculations
  * 
  * IMPLEMENTATION REQUIREMENTS:
  * 1. Schema Awareness
