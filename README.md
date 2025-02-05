@@ -1,6 +1,6 @@
-# PostgreSQL
+# Database Agent (PostgreSQL)
 
-Connery plugin to chat with a PostgreSQL database.
+AI agent that helps you to chat with and selectively update a PostgreSQL database.
 
 ## Actions
 
@@ -19,11 +19,6 @@ This plugin provides three actions for interacting with PostgreSQL databases:
    - Requires write-enabled connection string, update query template with {record} and {value} placeholders
    - Supports transaction handling with automatic rollback on failure
    - Returns both the executed query and the updated record
-
-3. **Update Any Field of Record with AI** (`updateAnyFieldOfRecordWithAI`)
-   - Updates a single field in a specific database record using natural language, where AI generates the SQL automatically.
-   - Requires Anthropic API key, write-enabled connection string, and an explicit description of the record, field, and new value to update.
-   - Returns the executed query and the updated record.
 
 ## Repository structure
 
