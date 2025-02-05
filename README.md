@@ -6,14 +6,14 @@ AI agent that helps you to chat with and selectively update a PostgreSQL databas
 
 This plugin provides three actions for interacting with PostgreSQL databases:
 
-1. **Chat with your DB** (`chatWithYourDb`)
+1. **READ: Chat with your DB** (`chatWithYourDb`)
 
    - Executes a read-only SQL query and returns the results
    - Requires read-only connection string and SQL query as inputs
    - Automatically retrieves the schema of the database and uses it to generate the SQL query
    - Perfect for SELECT statements and data retrieval for non-technical users
 
-2. **Update Specific Field or Record** (`updateSpecificFieldOfRecord`)
+2. **WRITE: Update Specific Field or Record** (`updateSpecificFieldOfRecord`)
 
    - Updates a specific field in a database record using a predefined query template
    - Requires write-enabled connection string, update query template with {record} and {value} placeholders
